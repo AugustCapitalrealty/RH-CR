@@ -7,7 +7,7 @@ const vm = require('vm');
 const path = require('path');
 const { criarSlidesApp } = require('./_slides_falso');
 
-const RAIZ = path.join(__dirname, '..', 'google-apps-script');
+const RAIZ = path.join(__dirname, '..');
 const DECK = '1axfQX9FW1U4EIlnhJKDA2XizGoERMGNNXF8nmPCOpSI';
 
 const GERAR = "gerarApresentacaoDaArea('Planejamento & Gestão')";

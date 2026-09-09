@@ -1,7 +1,7 @@
 /** Estimativa de estouro de texto: caracteres que cabem vs. caracteres escritos. */
 const fs = require('fs'), vm = require('vm'), path = require('path');
 const { criarSlidesApp } = require('./_slides_falso');
-const RAIZ = path.join(__dirname, '..', 'google-apps-script');
+const RAIZ = path.join(__dirname, '..');
 const DECK = '1axfQX9FW1U4EIlnhJKDA2XizGoERMGNNXF8nmPCOpSI';
 
 const { SlidesApp, deck, registro } = criarSlidesApp(DECK, {});

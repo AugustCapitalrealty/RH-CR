@@ -6,7 +6,7 @@
 const fs=require('fs'),vm=require('vm'),path=require('path');
 const {criarSlidesApp}=require('./_slides_falso');
 const {svgDoSlide}=require('./_previa_svg');
-const RAIZ=path.join(__dirname,'..','google-apps-script'), DECK='1axfQX9FW1U4EIlnhJKDA2XizGoERMGNNXF8nmPCOpSI';
+const RAIZ=path.join(__dirname, '..'), DECK='1axfQX9FW1U4EIlnhJKDA2XizGoERMGNNXF8nmPCOpSI';
 const {SlidesApp,registro}=criarSlidesApp(DECK,{slidesIniciais:0});
 const p={abas:{},getSheetByName:n=>p.abas[n]||null,insertSheet(n){p.abas[n]=ab(n);return p.abas[n];}};
 function ab(nome){const a={nome,dados:[],_g(l,c){while(a.dados.length<l)a.dados.push([]);const li=a.dados[l-1];while(li.length<c)li.push('');},clear(){a.dados=[];return a;},appendRow(x){a.dados.push(x.slice());return a;},getLastRow:()=>a.dados.length,getMaxRows:()=>a.dados.length,setFrozenRows:()=>a,autoResizeColumn:()=>a,setColumnWidth:()=>a,deleteRows(i,q){a.dados.splice(i-1,q);return a;},getDataRange:()=>({getValues:()=>a.dados.map(l=>l.slice())}),getRange(l,c){const f={setValues(v){v.forEach((lv,i)=>{a._g(l+i,c+lv.length-1);lv.forEach((x,j)=>{a.dados[l+i-1][c+j-1]=x;});});return f;},setValue(v){a._g(l,c);a.dados[l-1][c-1]=v;return f;},setBackground:()=>f,setFontColor:()=>f,setFontWeight:()=>f,setWrap:()=>f};return f;}};return a;}

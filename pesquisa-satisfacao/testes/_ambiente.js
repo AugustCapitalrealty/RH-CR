@@ -8,7 +8,7 @@ const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
 
-const RAIZ = path.join(__dirname, '..', 'google-apps-script');
+const RAIZ = path.join(__dirname, '..');
 
 function criarAba(nome) {
   const a = {

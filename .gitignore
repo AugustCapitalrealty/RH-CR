@@ -1,1 +1,13 @@
+﻿# Credenciais e arquivos locais do Clasp
+.clasprc.json
+
+# Dependências Node
+node_modules/
+
+# Sistema Operacional e Logs
+.DS_Store
+Thumbs.db
+*.log
+
+# Pastas temporárias
 previa/

@@ -8,7 +8,7 @@ const vm = require('vm');
 const path = require('path');
 const { criarSlidesApp } = require('./_slides_falso');
 
-const RAIZ = path.join(__dirname, '..', 'google-apps-script');
+const RAIZ = path.join(__dirname, '..');
 // O mesmo ID configurado em PRHE_CONFIG.deckId: como o código tem precedência
 // sobre a propriedade de script, o deck falso precisa atender por esse ID.
 const DECK = '1axfQX9FW1U4EIlnhJKDA2XizGoERMGNNXF8nmPCOpSI';

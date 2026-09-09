@@ -9,7 +9,7 @@ const path = require('path');
 const { criarSlidesApp } = require('./_slides_falso');
 const { svgDoSlide } = require('./_previa_svg');
 
-const RAIZ = path.join(__dirname, '..', 'google-apps-script');
+const RAIZ = path.join(__dirname, '..');
 const DECK = '1axfQX9FW1U4EIlnhJKDA2XizGoERMGNNXF8nmPCOpSI';
 const { SlidesApp, registro } = criarSlidesApp(DECK, { slidesIniciais: 0 });
 
