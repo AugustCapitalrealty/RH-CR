@@ -505,9 +505,10 @@ function enviarEmailInscricao(dados) {
       `;
     }
 
+    const textoSimples = 'Inscrição para a Devolutiva da Pesquisa RH 360 — Capital Realty (' + area + ').';
     let enviou = false;
     try {
-      GmailApp.sendEmail(destinatario, assunto, '', {
+      GmailApp.sendEmail(destinatario, assunto, textoSimples, {
         htmlBody: htmlCorpo,
         name: NOME_REMETENTE_EMAIL
       });
@@ -519,6 +520,7 @@ function enviarEmailInscricao(dados) {
         MailApp.sendEmail({
           to: destinatario,
           subject: assunto,
+          body: textoSimples,
           htmlBody: htmlCorpo,
           name: NOME_REMETENTE_EMAIL
         });
@@ -881,10 +883,11 @@ function enviarEmailPromocao(dados) {
         </div>
       </div>
     `;
+    const textoSimples = 'Boa notícia! Você foi promovido(a) com vaga garantida na Devolutiva RH (' + dados.area + ').';
     try {
-      GmailApp.sendEmail(dados.email, assunto, '', { htmlBody: htmlCorpo, name: NOME_REMETENTE_EMAIL });
+      GmailApp.sendEmail(dados.email, assunto, textoSimples, { htmlBody: htmlCorpo, name: NOME_REMETENTE_EMAIL });
     } catch(eG) {
-      MailApp.sendEmail({ to: dados.email, subject: assunto, htmlBody: htmlCorpo, name: NOME_REMETENTE_EMAIL });
+      MailApp.sendEmail({ to: dados.email, subject: assunto, body: textoSimples, htmlBody: htmlCorpo, name: NOME_REMETENTE_EMAIL });
     }
   } catch(e) {
     Logger.log('Erro ao enviar e-mail de promoção: ' + e.message);
@@ -913,10 +916,11 @@ function enviarEmailCancelamento(dados) {
         </div>
       </div>
     `;
+    const textoSimples = 'Confirmação de cancelamento da inscrição para a Devolutiva RH (' + dados.area + ').';
     try {
-      GmailApp.sendEmail(dados.email, assunto, '', { htmlBody: htmlCorpo, name: NOME_REMETENTE_EMAIL });
+      GmailApp.sendEmail(dados.email, assunto, textoSimples, { htmlBody: htmlCorpo, name: NOME_REMETENTE_EMAIL });
     } catch(eG) {
-      MailApp.sendEmail({ to: dados.email, subject: assunto, htmlBody: htmlCorpo, name: NOME_REMETENTE_EMAIL });
+      MailApp.sendEmail({ to: dados.email, subject: assunto, body: textoSimples, htmlBody: htmlCorpo, name: NOME_REMETENTE_EMAIL });
     }
   } catch(e) {
     Logger.log('Erro ao enviar e-mail de cancelamento: ' + e.message);
