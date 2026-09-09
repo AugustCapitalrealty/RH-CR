@@ -24,6 +24,9 @@ const ID_AGENDA = 'primary';
 // Nome de exibição nos e-mails enviados
 const NOME_REMETENTE_EMAIL = 'RH Capital Realty';
 
+// Sala física padrão no Google Workspace para as devolutivas
+const SALA_PADRAO = 'Sala Andersen';
+
 // Lista das 13 Áreas da Capital Realty
 const AREAS_EMPRESA = [
   "Planejamento & Gestão",
@@ -441,17 +444,25 @@ function realizarInscricao(dados) {
       // Atualiza contador na aba Sessoes
       abaSessoes.getRange(linhaSessao, 8).setValue(numVaga);
 
-      // Adiciona convidado no Calendar se o evento já existir
-      if (sessaoEncontrada.idEvento) {
+      // Garante ou cria o evento no Google Calendar e adiciona o colaborador
+      const eventoCal = garantirEventoCalendar(
+        sessaoEncontrada,
+        linhaSessao,
+        abaSessoes,
+        dStr,
+        hIni,
+        hFim
+      );
+
+      if (eventoCal) {
         try {
-          const agenda = CalendarApp.getCalendarById(ID_AGENDA);
-          const evento = agenda.getEventById(sessaoEncontrada.idEvento);
-          if (evento) {
-            evento.addGuest(emailLimpo);
-          }
+          eventoCal.addGuest(emailLimpo);
+          Logger.log('Colaborador ' + emailLimpo + ' adicionado com sucesso ao evento!');
         } catch (eCal) {
           Logger.log('Erro ao convidar no Calendar: ' + eCal.message);
         }
+      } else {
+        Logger.log('Aviso: Evento do Calendar não criado pois a Data ainda não foi definida na planilha para ' + sessaoEncontrada.area);
       }
     } else {
       // Lista de espera (13º em diante)
@@ -503,70 +514,182 @@ function realizarInscricao(dados) {
 }
 
 // ============================================================================
-// 5. SINCRONIZAÇÃO COM GOOGLE CALENDAR
+// 6. GESTÃO DO GOOGLE CALENDAR E RESERVA DE SALAS (RECURSOS)
 // ============================================================================
 
+/**
+ * Busca o endereço de e-mail do recurso de sala (ex: Sala Andersen)
+ */
+function obterEmailRecursoSala(nomeProcurado) {
+  try {
+    const alvo = (nomeProcurado || 'andersen').toLowerCase();
+    const todasAgendas = CalendarApp.getAllCalendars();
+    for (let i = 0; i < todasAgendas.length; i++) {
+      const ag = todasAgendas[i];
+      const nome = (ag.getName() || '').toLowerCase();
+      const id = ag.getId();
+      // No Google Workspace, o recurso de sala tem o nome correspondente ou id de resource
+      if (nome.includes(alvo) || nome.includes('andersen')) {
+        Logger.log('Recurso de sala encontrado: ' + ag.getName() + ' (' + id + ')');
+        return id;
+      }
+    }
+  } catch (e) {
+    Logger.log('Aviso ao buscar recurso de sala: ' + e.message);
+  }
+  return null;
+}
+
+/**
+ * Garante que o evento no Calendar existe (busca ou cria) e reserva a sala
+ */
+function garantirEventoCalendar(sessao, linhaSessao, abaSessoes, dataLimpa, horaIniVal, horaFimVal) {
+  const agenda = CalendarApp.getCalendarById(ID_AGENDA);
+  let idEvento = sessao.idEvento;
+
+  // 1. Se já tem ID gravado, tenta resgatar o evento existente
+  if (idEvento) {
+    let evento = agenda.getEventById(idEvento);
+    if (!evento && idEvento.includes('@')) {
+      evento = agenda.getEventById(idEvento.split('@')[0]);
+    }
+    if (!evento) {
+      evento = CalendarApp.getEventById(idEvento);
+    }
+    if (evento) return evento;
+  }
+
+  // 2. Se não tem ID, mas tem data válida, cria o evento agora no Calendar!
+  if (dataLimpa) {
+    try {
+      let dia = 1, mes = 0, ano = 2026;
+      if (dataLimpa.includes('/')) {
+        const partes = dataLimpa.split('/');
+        dia = parseInt(partes[0], 10);
+        mes = parseInt(partes[1], 10) - 1;
+        ano = parseInt(partes[2], 10);
+      } else if (dataLimpa.includes('-')) {
+        const partes = dataLimpa.split('-');
+        ano = parseInt(partes[0], 10);
+        mes = parseInt(partes[1], 10) - 1;
+        dia = parseInt(partes[2], 10);
+      }
+
+      let horaIni = 14, minIni = 0, horaFim = 15, minFim = 0;
+      if (horaIniVal) {
+        const pIni = horaIniVal.split(':');
+        if (pIni.length >= 2) { horaIni = parseInt(pIni[0], 10); minIni = parseInt(pIni[1], 10); }
+      }
+      if (horaFimVal) {
+        const pFim = horaFimVal.split(':');
+        if (pFim.length >= 2) { horaFim = parseInt(pFim[0], 10); minFim = parseInt(pFim[1], 10); }
+      }
+
+      const inicio = new Date(ano, mes, dia, horaIni, minIni, 0);
+      const fim = new Date(ano, mes, dia, horaFim, minFim, 0);
+
+      const localFinal = sessao.local || SALA_PADRAO;
+      const titulo = '📊 Devolutiva Pesquisa RH — ' + sessao.area;
+      const descricao = 'Apresentação aberta dos resultados da Pesquisa RH 360 para a área: ' + sessao.area + '.\n\nLocal: ' + localFinal + ' (Limite: ' + LIMITE_VAGAS_PADRAO + ' pessoas).';
+
+      const novoEvento = agenda.createEvent(titulo, inicio, fim, {
+        location: localFinal,
+        description: descricao,
+        sendInvites: true
+      });
+
+      // Tenta reservar o recurso de sala no Google Workspace (ex: Sala Andersen)
+      const emailSala = obterEmailRecursoSala(localFinal);
+      if (emailSala) {
+        try {
+          novoEvento.addGuest(emailSala);
+          Logger.log('Recurso de sala ' + localFinal + ' reservado com sucesso no Google Calendar!');
+        } catch (eSala) {
+          Logger.log('Aviso ao adicionar sala: ' + eSala.message);
+        }
+      }
+
+      // Grava o ID do evento na planilha
+      if (linhaSessao && abaSessoes) {
+        abaSessoes.getRange(linhaSessao, 10).setValue(novoEvento.getId());
+      }
+
+      return novoEvento;
+    } catch (err) {
+      Logger.log('Erro ao criar evento sob demanda no Calendar: ' + err.message);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Cria ou atualiza os eventos no Calendar para todas as sessões com data preenchida
+ */
 function sincronizarComCalendar() {
   const ss = getPlanilhaDB();
   const abaSessoes = ss.getSheetByName('Sessoes');
+  const abaInscricoes = ss.getSheetByName('Inscricoes');
   const dados = abaSessoes.getDataRange().getValues();
   const displayValores = abaSessoes.getDataRange().getDisplayValues();
-  const agenda = CalendarApp.getCalendarById(ID_AGENDA);
+  const inscricoesDados = abaInscricoes ? abaInscricoes.getDataRange().getValues() : [];
 
   let criados = 0;
+  let convidadosTotal = 0;
 
   for (let i = 1; i < dados.length; i++) {
     const row = dados[i];
     const rowDisplay = displayValores[i];
+    const idSessao = String(row[0]);
     const area = row[1];
     const dataLimpa = sanitizarData(row[2], rowDisplay[2]);
     const horaIniVal = rowDisplay[3] || '14:00';
     const horaFimVal = rowDisplay[4] || '15:00';
-    const local = row[5] || 'Sala de Reunião';
+    const local = row[5] || SALA_PADRAO;
     let idEvento = row[9];
 
-    if (dataLimpa && !idEvento) {
-      try {
-        let dia = 1, mes = 0, ano = 2026;
-        if (dataLimpa.includes('/')) {
-          const partes = dataLimpa.split('/');
-          dia = parseInt(partes[0], 10);
-          mes = parseInt(partes[1], 10) - 1;
-          ano = parseInt(partes[2], 10);
-        } else if (dataLimpa.includes('-')) {
-          const partes = dataLimpa.split('-');
-          ano = parseInt(partes[0], 10);
-          mes = parseInt(partes[1], 10) - 1;
-          dia = parseInt(partes[2], 10);
+    if (dataLimpa) {
+      const sessaoObj = {
+        idSessao: idSessao,
+        area: area,
+        local: local,
+        idEvento: idEvento
+      };
+
+      const evento = garantirEventoCalendar(sessaoObj, i + 1, abaSessoes, dataLimpa, horaIniVal, horaFimVal);
+
+      if (evento) {
+        if (!idEvento) criados++;
+
+        // Convida todos os inscritos confirmados na planilha
+        for (let j = 1; j < inscricoesDados.length; j++) {
+          const sessaoInsc = String(inscricoesDados[j][1]);
+          const emailInsc = String(inscricoesDados[j][4]).trim().toLowerCase();
+          const statusInsc = String(inscricoesDados[j][6]);
+
+          if (sessaoInsc === idSessao && statusInsc.startsWith('Confirmado') && emailInsc) {
+            try {
+              evento.addGuest(emailInsc);
+              convidadosTotal++;
+            } catch (eG) {}
+          }
         }
-
-        let horaIni = 14, minIni = 0, horaFim = 15, minFim = 0;
-        const pIni = horaIniVal.split(':');
-        if (pIni.length >= 2) { horaIni = parseInt(pIni[0], 10); minIni = parseInt(pIni[1], 10); }
-        const pFim = horaFimVal.split(':');
-        if (pFim.length >= 2) { horaFim = parseInt(pFim[0], 10); minFim = parseInt(pFim[1], 10); }
-
-        const inicio = new Date(ano, mes, dia, horaIni, minIni, 0);
-        const fim = new Date(ano, mes, dia, horaFim, minFim, 0);
-
-        const titulo = '📊 Devolutiva Pesquisa RH — ' + area;
-        const descricao = 'Apresentação aberta dos resultados da Pesquisa RH 360 para a área: ' + area + '.\n\nCapacidade máxima da sala: ' + LIMITE_VAGAS_PADRAO + ' pessoas.';
-
-        const evento = agenda.createEvent(titulo, inicio, fim, {
-          location: local,
-          description: descricao,
-          sendInvites: true
-        });
-
-        abaSessoes.getRange(i + 1, 10).setValue(evento.getId());
-        criados++;
-      } catch (err) {
-        Logger.log('Erro ao criar evento para ' + area + ': ' + err.message);
       }
     }
   }
 
-  return 'Sincronização concluída! ' + criados + ' novo(s) evento(s) criado(s) no Calendar.';
+  return 'Sincronização concluída! ' + criados + ' novo(s) evento(s) criado(s) e ' + convidadosTotal + ' convite(s) sincronizado(s).';
+}
+
+/**
+ * Função utilitária para imprimir no Log do Apps Script todos os recursos/salas encontrados
+ */
+function descobrirSalasERecursos() {
+  const todasAgendas = CalendarApp.getAllCalendars();
+  Logger.log('=== LISTA DE AGENDAS E RECURSOS DO GOOGLE WORKSPACE ===');
+  todasAgendas.forEach(function(ag) {
+    Logger.log('Nome: ' + ag.getName() + ' | ID: ' + ag.getId());
+  });
 }
 
 // ============================================================================
