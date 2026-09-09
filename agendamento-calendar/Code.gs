@@ -12,8 +12,8 @@
  * - Banco de dados em Google Sheets e sincronização com Google Calendar.
  */
 
-// ID da Planilha do Google Sheets (deixe vazio '' para usar a criada automaticamente)
-const ID_PLANILHA = '';
+// ID da Planilha do Google Sheets
+const ID_PLANILHA = '1v1SEGIhzfBYkI4xBCexZlRfRoqn_2WaHz83S9kR9x6g';
 
 // Limite de pessoas por sessão (capacidade da sala)
 const LIMITE_VAGAS_PADRAO = 12;
@@ -84,90 +84,219 @@ function obterUsuarioLogado() {
 }
 
 // ============================================================================
-// 2. BANCO DE DADOS (GOOGLE SHEETS)
+// 2. BANCO DE DADOS (GOOGLE SHEETS) E CONFIGURAÇÃO
 // ============================================================================
 
+/**
+ * Menu automático no Google Sheets para fácil acesso pelo usuário
+ */
+function onOpen() {
+  try {
+    SpreadsheetApp.getUi()
+      .createMenu('🏛️ RH Devolutivas')
+      .addItem('🔄 Resetar e Organizar Planilha', 'resetarEConfigurarPlanilha')
+      .addItem('📅 Sincronizar com Google Calendar', 'sincronizarComCalendar')
+      .addToUi();
+  } catch (e) {}
+}
+
 function getPlanilhaDB() {
-  let id = ID_PLANILHA;
+  // 1. Tenta obter a planilha ativa (quando executado no contexto do Google Sheets)
+  try {
+    const active = SpreadsheetApp.getActiveSpreadsheet();
+    if (active && (active.getSheetByName('Sessoes') || active.getSheetByName('Inscricoes'))) {
+      return active;
+    }
+  } catch (e) {}
+
+  // 2. ID configurado na constante
+  let id = (typeof ID_PLANILHA !== 'undefined' ? ID_PLANILHA : '').trim();
+
+  // 3. ID nas propriedades do script
   if (!id) {
     id = PropertiesService.getScriptProperties().getProperty('ID_PLANILHA');
   }
-  if (!id) {
-    throw new Error('A planilha ainda não foi configurada. Execute a função "inicializarSistema()" primeiro.');
-  }
-  return SpreadsheetApp.openById(id);
-}
 
-function inicializarSistema() {
-  let ss;
-  let id = ID_PLANILHA || PropertiesService.getScriptProperties().getProperty('ID_PLANILHA');
+  // 4. ID padrão da planilha do projeto
+  if (!id) {
+    id = '1v1SEGIhzfBYkI4xBCexZlRfRoqn_2WaHz83S9kR9x6g';
+  }
 
   if (id) {
-    ss = SpreadsheetApp.openById(id);
-  } else {
-    ss = SpreadsheetApp.create('RH Capital Realty — Gestão de Devolutivas');
-    PropertiesService.getScriptProperties().setProperty('ID_PLANILHA', ss.getId());
-    Logger.log('Nova planilha criada com sucesso!');
-    Logger.log('URL: ' + ss.getUrl());
-    Logger.log('ID: ' + ss.getId());
+    try {
+      return SpreadsheetApp.openById(id);
+    } catch (err) {
+      Logger.log('Aviso ao abrir planilha por ID: ' + err.message);
+    }
   }
 
-  // 1. Aba Sessoes
+  throw new Error('A planilha ainda não foi configurada. Execute a função "resetarEConfigurarPlanilha()".');
+}
+
+/**
+ * Reseta os contadores, limpa inscrições de teste,
+ * garante todas as colunas necessárias e as 13 sessões com a "Sala Andersen",
+ * preservando as datas e horários já preenchidos pelo RH!
+ */
+function resetarEConfigurarPlanilha() {
+  let ss = null;
+
+  try {
+    ss = getPlanilhaDB();
+  } catch (e) {
+    // Se não encontrou nenhuma, cria uma nova
+    ss = SpreadsheetApp.create('RH Capital Realty — Gestão de Devolutivas');
+    PropertiesService.getScriptProperties().setProperty('ID_PLANILHA', ss.getId());
+    Logger.log('Nova planilha criada: ' + ss.getUrl());
+  }
+
+  // -------------------------------------------------------------
+  // ABA 1: Sessoes
+  // -------------------------------------------------------------
   let abaSessoes = ss.getSheetByName('Sessoes');
   if (!abaSessoes) {
     abaSessoes = ss.insertSheet('Sessoes');
-    abaSessoes.getRange('A1:J1').setValues([[
-      'ID_Sessao',
-      'Area',
-      'Data (DD/MM/AAAA)',
-      'Horario_Inicio',
-      'Horario_Fim',
-      'Local',
-      'Limite_Vagas',
-      'Inscritos_Confirmados',
-      'Fila_Espera',
-      'ID_Evento_Calendar'
-    ]]).setFontWeight('bold').setBackground('#1e3a8a').setFontColor('#ffffff');
-
-    const dadosIniciais = AREAS_EMPRESA.map((area, index) => [
-      'SES-' + String(index + 1).padStart(2, '0'),
-      area,
-      '',         // Data a preencher pelo RH
-      '14:00',    // Horário padrão
-      '15:00',
-      SALA_PADRAO,
-      LIMITE_VAGAS_PADRAO,
-      0,
-      0,
-      ''
-    ]);
-
-    abaSessoes.getRange(2, 1, dadosIniciais.length, 10).setValues(dadosIniciais);
-    abaSessoes.autoResizeColumns(1, 10);
   }
 
-  // 2. Aba Inscricoes
+  // Mapeia datas e horários que o RH já preencheu para não perder nada
+  const dadosExistentes = {};
+  if (abaSessoes.getLastRow() > 1) {
+    const valoresAtuais = abaSessoes.getDataRange().getValues();
+    const displayAtuais = abaSessoes.getDataRange().getDisplayValues();
+    for (let r = 1; r < valoresAtuais.length; r++) {
+      const idSessao = String(valoresAtuais[r][0] || '').trim();
+      const area = String(valoresAtuais[r][1] || '').trim();
+      const dataTexto = sanitizarData(valoresAtuais[r][2], displayAtuais[r][2]);
+      const horaIni = displayAtuais[r][3] ? String(displayAtuais[r][3]).trim() : '';
+      const horaFim = displayAtuais[r][4] ? String(displayAtuais[r][4]).trim() : '';
+
+      const info = {
+        data: dataTexto,
+        horaIni: horaIni,
+        horaFim: horaFim
+      };
+      if (idSessao) dadosExistentes[idSessao] = info;
+      if (area) dadosExistentes[area] = info;
+    }
+  }
+
+  // Cabeçalhos padronizados da aba Sessoes (10 colunas)
+  const cabecalhoSessoes = [
+    'ID_Sessao',
+    'Area',
+    'Data (DD/MM/AAAA)',
+    'Horario_Inicio',
+    'Horario_Fim',
+    'Local',
+    'Limite_Vagas',
+    'Inscritos_Confirmados',
+    'Fila_Espera',
+    'ID_Evento_Calendar'
+  ];
+
+  // Gera as 13 sessões com Sala Andersen e contadores zerados
+  const linhasSessoes = AREAS_EMPRESA.map((area, index) => {
+    const idSessao = 'SES-' + String(index + 1).padStart(2, '0');
+    const salvo = dadosExistentes[idSessao] || dadosExistentes[area] || {};
+
+    const dataFinal = salvo.data || '';
+    const horaIniFinal = salvo.horaIni || '14:00';
+    const horaFimFinal = salvo.horaFim || '15:00';
+
+    return [
+      idSessao,
+      area,
+      dataFinal,
+      horaIniFinal,
+      horaFimFinal,
+      SALA_PADRAO,          // Sempre 'Sala Andersen'
+      LIMITE_VAGAS_PADRAO,  // Sempre 12 vagas
+      0,                    // Inscritos_Confirmados zerado para testes limpos
+      0,                    // Fila_Espera zerada
+      ''                    // ID_Evento_Calendar pronto para novo evento
+    ];
+  });
+
+  // Limpa conteúdo anterior e formatações antigas da aba Sessoes
+  abaSessoes.clear();
+
+  // Insere cabeçalhos e linhas
+  abaSessoes.getRange(1, 1, 1, cabecalhoSessoes.length).setValues([cabecalhoSessoes]);
+  abaSessoes.getRange(2, 1, linhasSessoes.length, cabecalhoSessoes.length).setValues(linhasSessoes);
+
+  // Formatação visual da aba Sessoes
+  abaSessoes.getRange(1, 1, 1, cabecalhoSessoes.length)
+    .setFontWeight('bold')
+    .setBackground('#1e3a8a')
+    .setFontColor('#ffffff')
+    .setHorizontalAlignment('center');
+
+  // Alinhamentos
+  const totalLinhas = linhasSessoes.length;
+  abaSessoes.getRange(2, 1, totalLinhas, 1).setHorizontalAlignment('center'); // ID_Sessao
+  abaSessoes.getRange(2, 3, totalLinhas, 3).setHorizontalAlignment('center'); // Data, Início, Fim
+  abaSessoes.getRange(2, 7, totalLinhas, 3).setHorizontalAlignment('center'); // Limite, Confirmados, Fila
+
+  abaSessoes.autoResizeColumns(1, cabecalhoSessoes.length);
+
+  // -------------------------------------------------------------
+  // ABA 2: Inscricoes
+  // -------------------------------------------------------------
   let abaInscricoes = ss.getSheetByName('Inscricoes');
   if (!abaInscricoes) {
     abaInscricoes = ss.insertSheet('Inscricoes');
-    abaInscricoes.getRange('A1:G1').setValues([[
-      'Data_Hora_Inscricao',
-      'ID_Sessao',
-      'Area_Sessao',
-      'Nome_Colaborador',
-      'Email_Colaborador',
-      'Departamento_Colaborador',
-      'Status_Inscricao'
-    ]]).setFontWeight('bold').setBackground('#1e3a8a').setFontColor('#ffffff');
-    abaInscricoes.autoResizeColumns(1, 7);
   }
 
+  const cabecalhoInscricoes = [
+    'Data_Hora_Inscricao',
+    'ID_Sessao',
+    'Area_Sessao',
+    'Nome_Colaborador',
+    'Email_Colaborador',
+    'Departamento_Colaborador',
+    'Status_Inscricao',
+    'Email_Enviado'
+  ];
+
+  // Limpa inscrições antigas de teste e recria cabeçalho
+  abaInscricoes.clear();
+  abaInscricoes.getRange(1, 1, 1, cabecalhoInscricoes.length).setValues([cabecalhoInscricoes]);
+
+  abaInscricoes.getRange(1, 1, 1, cabecalhoInscricoes.length)
+    .setFontWeight('bold')
+    .setBackground('#1e3a8a')
+    .setFontColor('#ffffff')
+    .setHorizontalAlignment('center');
+
+  abaInscricoes.autoResizeColumns(1, cabecalhoInscricoes.length);
+
+  // Remove abas padrão vazias se existirem
   const abaPadrao = ss.getSheetByName('Página1') || ss.getSheetByName('Sheet1');
   if (abaPadrao && ss.getSheets().length > 1) {
     try { ss.deleteSheet(abaPadrao); } catch (e) {}
   }
 
-  return { sucesso: true, url: ss.getUrl(), id: ss.getId() };
+  const msg = 'Planilha sincronizada e resetada com sucesso!\n' +
+    '• 13 Sessões configuradas com a "Sala Andersen"\n' +
+    '• Capacidade fixada em 12 vagas por sessão\n' +
+    '• Contadores zerados (12 vagas livres em todas)\n' +
+    '• Inscrições de teste anteriores apagadas\n' +
+    '• Datas e horários que você já preencheu foram preservados!';
+
+  Logger.log(msg);
+
+  try {
+    SpreadsheetApp.getUi().alert('✅ Sucesso', msg, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {}
+
+  return { sucesso: true, mensagem: msg, url: ss.getUrl(), id: ss.getId() };
+}
+
+/**
+ * Atalho de compatibilidade com inicializarSistema
+ */
+function inicializarSistema() {
+  return resetarEConfigurarPlanilha();
 }
 
 // ============================================================================
