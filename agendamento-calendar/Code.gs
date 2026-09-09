@@ -453,7 +453,7 @@ function enviarEmailInscricao(dados) {
           </div>
           <div style="padding: 28px; color: #334155; line-height: 1.6;">
             <p style="font-size: 16px; margin-top: 0;">Olá, <b>${nome}</b>!</p>
-            <p>Sua vaga presencial para a apresentação de resultados da área <b>${area}</b> está garantida.</p>
+            <p>Sua vaga presencial para a pesquisa de satisfação da área de <b>${area}</b> está garantida.</p>
             
             <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 16px; border-radius: 6px; margin: 20px 0;">
               <div style="margin-bottom: 8px;"><b>Área:</b> ${area}</div>
@@ -486,7 +486,7 @@ function enviarEmailInscricao(dados) {
           </div>
           <div style="padding: 28px; color: #334155; line-height: 1.6;">
             <p style="font-size: 16px; margin-top: 0;">Olá, <b>${nome}</b>!</p>
-            <p>Recebemos o seu interesse em participar da apresentação de resultados da área <b>${area}</b>.</p>
+            <p>Recebemos o seu interesse em participar da pesquisa de satisfação da área de <b>${area}</b>.</p>
             
             <div style="background-color: #fffbeb; border-left: 4px solid #f59e0b; padding: 16px; border-radius: 6px; margin: 20px 0;">
               <div style="margin-bottom: 8px;"><b>Área:</b> ${area}</div>
@@ -874,7 +874,7 @@ function enviarEmailPromocao(dados) {
         </div>
         <div style="padding: 28px; color: #334155; line-height: 1.6;">
           <p style="font-size: 16px; margin-top: 0;">Olá, <b>${dados.nome}</b>!</p>
-          <p>Houve uma desistência na apresentação de resultados da área <b>${dados.area}</b> e você acaba de ser <b>promovido(a) com vaga presencial garantida</b> na Sala Andersen (limite de 12 pessoas)!</p>
+          <p>Houve uma desistência na pesquisa de satisfação da área de <b>${dados.area}</b> e você acaba de ser <b>promovido(a) com vaga presencial garantida</b> na Sala Andersen (limite de 12 pessoas)!</p>
           <p>O convite na sua Google Agenda já foi vinculado automaticamente.</p>
           <p style="font-size: 13px; color: #64748b;">Caso não possa comparecer, você também pode desistir pelo formulário para liberar a vaga para o próximo colega.</p>
         </div>
@@ -1032,7 +1032,7 @@ function garantirEventoCalendar(sessao, linhaSessao, abaSessoes, dataLimpa, hora
 
       const localFinal = sessao.local || SALA_PADRAO;
       const titulo = '📊 Devolutiva Pesquisa RH — ' + sessao.area;
-      const descricao = 'Apresentação aberta dos resultados da Pesquisa RH 360 para a área: ' + sessao.area + '.\n\nLocal: ' + localFinal + ' (Limite: ' + LIMITE_VAGAS_PADRAO + ' pessoas).';
+      const descricao = 'Devolutiva da Pesquisa de Satisfação da área de ' + sessao.area + '.\n\nLocal: ' + localFinal + ' (Limite: ' + LIMITE_VAGAS_PADRAO + ' pessoas).';
 
       const novoEvento = agenda.createEvent(titulo, inicio, fim, {
         location: localFinal,
@@ -1332,7 +1332,7 @@ function getHtmlInterface() {
       </span>
       <h2 class="fw-bold mb-2">Devolutivas Abertas — Pesquisa RH 360</h2>
       <p class="lead opacity-90 mb-3" style="font-size: 1.05rem;">
-        Participe da apresentação de resultados das áreas. <br>
+        Participe da devolutiva da pesquisa de satisfação das áreas. <br>
         <span class="fw-bold text-warning"><i class="fa-solid fa-triangle-exclamation me-1"></i> Limite de 12 pessoas na sala</span> (ordem de inscrição).
       </p>
 
