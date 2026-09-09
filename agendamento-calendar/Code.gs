@@ -135,7 +135,7 @@ function inicializarSistema() {
       '',         // Data a preencher pelo RH
       '14:00',    // Horário padrão
       '15:00',
-      'Sala de Reunião Principal (Presencial)',
+      SALA_PADRAO,
       LIMITE_VAGAS_PADRAO,
       0,
       0,
@@ -308,7 +308,7 @@ function enviarEmailInscricao(dados) {
     const area = dados.area;
     const confirmado = dados.confirmado;
     const dataHoraStr = dados.dataHoraStr || 'A definir pelo RH';
-    const local = dados.local || 'Sala de Reunião Principal (Presencial)';
+    const local = dados.local || SALA_PADRAO;
 
     let assunto = '';
     let htmlCorpo = '';
@@ -1322,7 +1322,7 @@ function getHtmlInterface() {
 
       document.getElementById('modalIdSessao').value = sessao.idSessao;
       document.getElementById('modalAreaTitulo').innerText = 'Devolutiva: ' + sessao.area;
-      document.getElementById('modalInfoData').innerText = sessao.temDataDefinida ? (sessao.data + (sessao.horario ? ' às ' + sessao.horario : '')) : 'Data em definição pelo RH';
+      document.getElementById('modalInfoData').innerText = sessao.temDataDefinida ? (sessao.data + (sessao.horario ? ' — ' + sessao.horario : '')) : 'Data em definição pelo RH';
 
       const aviso = document.getElementById('modalAvisoStatus');
       if (!sessao.lotado) {
