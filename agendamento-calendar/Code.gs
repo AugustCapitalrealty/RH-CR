@@ -202,11 +202,39 @@ function sanitizarData(valorBruto, valorTexto) {
   return txt;
 }
 
-function obterSessoes() {
+function obterSessoes(emailConsulta) {
   try {
     const ss = getPlanilhaDB();
     const abaSessoes = ss.getSheetByName('Sessoes');
+    const abaInscricoes = ss.getSheetByName('Inscricoes');
     if (!abaSessoes) throw new Error('Aba "Sessoes" não encontrada.');
+
+    let emailAlvo = (emailConsulta || '').trim().toLowerCase();
+    if (!emailAlvo) {
+      try {
+        emailAlvo = Session.getActiveUser().getEmail().toLowerCase().trim();
+      } catch (e) {}
+    }
+
+    // Mapeia as inscrições ativas do usuário
+    const inscricoesUsuario = {};
+    if (emailAlvo && abaInscricoes) {
+      const inscricoesDados = abaInscricoes.getDataRange().getValues();
+      for (let j = 1; j < inscricoesDados.length; j++) {
+        const rowInsc = inscricoesDados[j];
+        const sessaoId = String(rowInsc[1]);
+        const emailInsc = String(rowInsc[4]).trim().toLowerCase();
+        const statusInsc = String(rowInsc[6]);
+
+        if (emailInsc === emailAlvo && !statusInsc.startsWith('Cancelado')) {
+          inscricoesUsuario[sessaoId] = {
+            inscrito: true,
+            status: statusInsc,
+            ehConfirmado: statusInsc.startsWith('Confirmado')
+          };
+        }
+      }
+    }
 
     const valores = abaSessoes.getDataRange().getValues();
     const displayValores = abaSessoes.getDataRange().getDisplayValues();
@@ -227,7 +255,7 @@ function obterSessoes() {
       // Horários
       const horaInicio = rowDisplay[3] ? rowDisplay[3].trim() : '';
       const horaFim = rowDisplay[4] ? rowDisplay[4].trim() : '';
-      const local = String(row[5] || 'Sala de Reunião Principal');
+      const local = String(row[5] || SALA_PADRAO);
       const limite = Number(row[6]) || LIMITE_VAGAS_PADRAO;
       const confirmados = Number(row[7]) || 0;
       const espera = Number(row[8]) || 0;
@@ -241,10 +269,12 @@ function obterSessoes() {
         horarioFormatado = horaInicio + (horaFim ? ' às ' + horaFim : '');
       }
 
+      const minhaInsc = inscricoesUsuario[idSessao] || null;
+
       sessoes.push({
         idSessao: idSessao,
         area: area,
-        data: dataStr, // Retorna '' se não tiver data definida
+        data: dataStr,
         temDataDefinida: Boolean(dataStr),
         horario: horarioFormatado,
         local: local,
@@ -253,7 +283,8 @@ function obterSessoes() {
         espera: espera,
         vagasRestantes: vagasRestantes,
         lotado: lotado,
-        temEventoCalendar: Boolean(idEvento)
+        temEventoCalendar: Boolean(idEvento),
+        minhaInscricao: minhaInsc
       });
     }
 
@@ -420,13 +451,15 @@ function realizarInscricao(dados) {
       throw new Error('Sessão informada não foi encontrada.');
     }
 
-    // Verifica duplicidade de inscrição (mesmo e-mail na mesma sessão)
+    // Verifica duplicidade de inscrição ativa (mesmo e-mail na mesma sessão)
     const inscricoesDados = abaInscricoes.getDataRange().getValues();
     for (let j = 1; j < inscricoesDados.length; j++) {
       const sessaoCadastrada = String(inscricoesDados[j][1]);
       const emailCadastrado = String(inscricoesDados[j][4]).trim().toLowerCase();
-      if (sessaoCadastrada === dados.idSessao && emailCadastrado === emailLimpo) {
-        throw new Error('Você já possui uma inscrição realizada para esta sessão!');
+      const statusCadastrado = String(inscricoesDados[j][6]);
+
+      if (sessaoCadastrada === dados.idSessao && emailCadastrado === emailLimpo && !statusCadastrado.startsWith('Cancelado')) {
+        throw new Error('Você já possui uma inscrição ativa para esta sessão!');
       }
     }
 
@@ -510,6 +543,221 @@ function realizarInscricao(dados) {
     };
   } catch (err) {
     return { sucesso: false, erro: err.message };
+  }
+}
+
+// ============================================================================
+// 6. CANCELAMENTO / DESISTÊNCIA DE VAGA E PROMOÇÃO DA FILA
+// ============================================================================
+
+/**
+ * Permite ao colaborador desistir da vaga, liberando o espaço e promovendo a lista de espera
+ */
+function cancelarInscricao(dados) {
+  try {
+    // dados = { idSessao, email }
+    let emailLimpo = (dados.email || '').trim().toLowerCase();
+    if (!emailLimpo) {
+      try {
+        emailLimpo = Session.getActiveUser().getEmail().toLowerCase().trim();
+      } catch (e) {}
+    }
+
+    if (!dados.idSessao || !emailLimpo) {
+      throw new Error('Identificação do colaborador ou sessão não informada.');
+    }
+
+    const ss = getPlanilhaDB();
+    const abaSessoes = ss.getSheetByName('Sessoes');
+    const abaInscricoes = ss.getSheetByName('Inscricoes');
+
+    const sessoesDados = abaSessoes.getDataRange().getValues();
+    let linhaSessao = -1;
+    let sessaoObj = null;
+
+    for (let i = 1; i < sessoesDados.length; i++) {
+      if (String(sessoesDados[i][0]) === dados.idSessao) {
+        linhaSessao = i + 1;
+        sessaoObj = {
+          idSessao: sessoesDados[i][0],
+          area: sessoesDados[i][1],
+          limite: Number(sessoesDados[i][6]) || LIMITE_VAGAS_PADRAO,
+          confirmados: Number(sessoesDados[i][7]) || 0,
+          espera: Number(sessoesDados[i][8]) || 0,
+          idEvento: String(sessoesDados[i][9] || '')
+        };
+        break;
+      }
+    }
+
+    if (!sessaoObj) throw new Error('Sessão não encontrada.');
+
+    // Localiza a inscrição ativa do colaborador
+    const inscricoesDados = abaInscricoes.getDataRange().getValues();
+    let linhaInscricao = -1;
+    let inscricaoAtiva = null;
+
+    for (let j = 1; j < inscricoesDados.length; j++) {
+      const sId = String(inscricoesDados[j][1]);
+      const em = String(inscricoesDados[j][4]).trim().toLowerCase();
+      const st = String(inscricoesDados[j][6]);
+
+      if (sId === dados.idSessao && em === emailLimpo && !st.startsWith('Cancelado')) {
+        linhaInscricao = j + 1;
+        inscricaoAtiva = {
+          nome: inscricoesDados[j][3],
+          email: em,
+          status: st,
+          ehConfirmado: st.startsWith('Confirmado')
+        };
+        break;
+      }
+    }
+
+    if (!inscricaoAtiva) {
+      throw new Error('Nenhuma inscrição ativa encontrada para este e-mail nesta sessão.');
+    }
+
+    const agora = new Date();
+    const carimbo = Utilities.formatDate(agora, Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm:ss');
+
+    // 1. Marca como cancelado na planilha
+    abaInscricoes.getRange(linhaInscricao, 7).setValue('Cancelado em ' + carimbo);
+
+    let mensagemRetorno = '';
+
+    if (inscricaoAtiva.ehConfirmado) {
+      // O usuário tinha vaga confirmada: verifica se há alguém na Lista de Espera para promover
+      let linhaPromovido = -1;
+      let promovidoObj = null;
+
+      for (let k = 1; k < inscricoesDados.length; k++) {
+        const sIdK = String(inscricoesDados[k][1]);
+        const emK = String(inscricoesDados[k][4]).trim().toLowerCase();
+        const stK = String(inscricoesDados[k][6]);
+
+        if (sIdK === dados.idSessao && stK.startsWith('Lista de Espera') && k !== (linhaInscricao - 1)) {
+          linhaPromovido = k + 1;
+          promovidoObj = {
+            nome: inscricoesDados[k][3],
+            email: emK
+          };
+          break; // Promove o primeiro da fila
+        }
+      }
+
+      if (promovidoObj) {
+        // Promove o primeiro da fila de espera!
+        abaInscricoes.getRange(linhaPromovido, 7).setValue('Confirmado (Promovido da Fila - Vaga 12/12)');
+        
+        // Reduz contador da fila de espera
+        const novaEspera = Math.max(0, sessaoObj.espera - 1);
+        abaSessoes.getRange(linhaSessao, 9).setValue(novaEspera);
+
+        // Adiciona o promovido ao evento do Calendar
+        if (sessaoObj.idEvento) {
+          try {
+            const agenda = CalendarApp.getCalendarById(ID_AGENDA);
+            const evento = agenda.getEventById(sessaoObj.idEvento);
+            if (evento) {
+              evento.addGuest(promovidoObj.email);
+            }
+          } catch (eC) {}
+        }
+
+        // Dispara e-mail avisando o colaborador promovido
+        enviarEmailPromocao({
+          email: promovidoObj.email,
+          nome: promovidoObj.nome,
+          area: sessaoObj.area
+        });
+
+        mensagemRetorno = 'Sua vaga foi liberada com sucesso! O próximo colega da lista de espera foi promovido automaticamente.';
+      } else {
+        // Não havia fila de espera: reduz contador de confirmados
+        const novosConfirmados = Math.max(0, sessaoObj.confirmados - 1);
+        abaSessoes.getRange(linhaSessao, 8).setValue(novosConfirmados);
+        mensagemRetorno = 'Sua vaga foi cancelada com sucesso e liberada para novos interessados.';
+      }
+
+    } else {
+      // O usuário estava apenas na lista de espera
+      const novaEspera = Math.max(0, sessaoObj.espera - 1);
+      abaSessoes.getRange(linhaSessao, 9).setValue(novaEspera);
+      mensagemRetorno = 'Sua inscrição na lista de espera foi cancelada com sucesso.';
+    }
+
+    // Envia e-mail de confirmação do cancelamento para quem desistiu
+    enviarEmailCancelamento({
+      email: emailLimpo,
+      nome: inscricaoAtiva.nome,
+      area: sessaoObj.area
+    });
+
+    return {
+      sucesso: true,
+      mensagem: mensagemRetorno
+    };
+  } catch (err) {
+    return { sucesso: false, erro: err.message };
+  }
+}
+
+/**
+ * Notifica colaborador que foi promovido da lista de espera para vaga presencial
+ */
+function enviarEmailPromocao(dados) {
+  try {
+    const assunto = '🎉 Vaga Liberada! Você foi promovido(a) na Devolutiva RH — ' + dados.area;
+    const htmlCorpo = `
+      <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #16a34a, #15803d); color: #ffffff; padding: 28px; text-align: center;">
+          <span style="background: rgba(255,255,255,0.2); padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold;">RH CAPITAL REALTY</span>
+          <h2 style="margin: 12px 0 6px 0; font-size: 22px;">Boa notícia! Vaga Confirmada!</h2>
+          <p style="margin: 0; opacity: 0.9; font-size: 14px;">Você saiu da Lista de Espera</p>
+        </div>
+        <div style="padding: 28px; color: #334155; line-height: 1.6;">
+          <p style="font-size: 16px; margin-top: 0;">Olá, <b>${dados.nome}</b>!</p>
+          <p>Houve uma desistência na apresentação de resultados da área <b>${dados.area}</b> e você acaba de ser <b>promovido(a) com vaga presencial garantida</b> na Sala Andersen (limite de 12 pessoas)!</p>
+          <p>O convite na sua Google Agenda já foi vinculado automaticamente.</p>
+          <p style="font-size: 13px; color: #64748b;">Caso não possa comparecer, você também pode desistir pelo formulário para liberar a vaga para o próximo colega.</p>
+        </div>
+        <div style="background-color: #f1f5f9; padding: 16px; text-align: center; font-size: 12px; color: #94a3b8;">
+          Equipe de Recursos Humanos — Capital Realty
+        </div>
+      </div>
+    `;
+    MailApp.sendEmail({ to: dados.email, subject: assunto, htmlBody: htmlCorpo, name: NOME_REMETENTE_EMAIL });
+  } catch(e) {
+    Logger.log('Erro ao enviar e-mail de promoção: ' + e.message);
+  }
+}
+
+/**
+ * Notifica colaborador sobre o cancelamento da sua inscrição
+ */
+function enviarEmailCancelamento(dados) {
+  try {
+    const assunto = 'Confirmação de Cancelamento — Devolutiva RH: ' + dados.area;
+    const htmlCorpo = `
+      <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #475569, #334155); color: #ffffff; padding: 24px; text-align: center;">
+          <span style="background: rgba(255,255,255,0.2); padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold;">RH CAPITAL REALTY</span>
+          <h3 style="margin: 10px 0 0 0; color: #ffffff;">Cancelamento Confirmado</h3>
+        </div>
+        <div style="padding: 24px; color: #334155; line-height: 1.6;">
+          <p>Olá, <b>${dados.nome}</b>!</p>
+          <p>Confirmamos que a sua inscrição para a Devolutiva da área <b>${dados.area}</b> foi cancelada com sucesso.</p>
+          <p>Agradecemos por avisar com antecedência e liberar o espaço na sala para os seus colegas!</p>
+        </div>
+        <div style="background-color: #f1f5f9; padding: 16px; text-align: center; font-size: 12px; color: #94a3b8;">
+          Equipe de Recursos Humanos — Capital Realty
+        </div>
+      </div>
+    `;
+    MailApp.sendEmail({ to: dados.email, subject: assunto, htmlBody: htmlCorpo, name: NOME_REMETENTE_EMAIL });
+  } catch(e) {
+    Logger.log('Erro ao enviar e-mail de cancelamento: ' + e.message);
   }
 }
 
@@ -875,16 +1123,55 @@ function getHtmlInterface() {
     </div>
   </div>
 
+  <!-- Modal de Cancelamento / Desistência de Vaga -->
+  <div class="modal fade" id="modalCancelamento" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content border-0 shadow-lg" style="border-radius: 16px;">
+        <div class="modal-header border-0 bg-light" style="border-radius: 16px 16px 0 0;">
+          <div>
+            <h5 class="modal-title fw-bold text-danger"><i class="fa-solid fa-triangle-exclamation me-1"></i>Desistir da Vaga</h5>
+            <div class="text-muted small" id="modalCancelArea">Área</div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body p-4">
+          <input type="hidden" id="modalCancelIdSessao">
+          
+          <div id="boxConfirmarCancelamento">
+            <div class="alert alert-secondary small py-2 mb-3">
+              <b>Sua situação atual:</b> <span id="modalCancelStatusAtual">-</span>
+            </div>
+            <p class="mb-3">
+              Tem certeza que deseja desistir da sua vaga na devolutiva de <b id="modalCancelNomeArea">-</b>?
+            </p>
+            <p class="small text-muted mb-4">
+              <i class="fa-solid fa-circle-info me-1"></i> Ao confirmar, sua vaga será liberada imediatamente para o próximo colega na lista de espera.
+            </p>
+            <div class="d-flex gap-2">
+              <button type="button" class="btn btn-light w-50" data-bs-dismiss="modal">Voltar</button>
+              <button type="button" class="btn btn-danger w-50" id="btnExecutarCancelamento" onclick="executarCancelamento()">
+                Sim, Desistir da Vaga
+              </button>
+            </div>
+          </div>
+
+          <div id="boxResultadoCancelamento" class="text-center py-3" style="display: none;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script>
     let sessoesCache = [];
     let modalInstance = null;
+    let modalCancelInstance = null;
     let usuarioConectado = null;
 
     window.onload = function() {
       modalInstance = new bootstrap.Modal(document.getElementById('modalInscricao'));
+      modalCancelInstance = new bootstrap.Modal(document.getElementById('modalCancelamento'));
       detectarUsuario();
-      carregarSessoes();
     };
 
     function detectarUsuario() {
@@ -896,6 +1183,10 @@ function getHtmlInterface() {
             document.getElementById('lblEmailUsuario').innerText = res.email;
             document.getElementById('boxUsuarioLogado').style.display = 'block';
           }
+          carregarSessoes();
+        })
+        .withFailureHandler(function() {
+          carregarSessoes();
         })
         .obterUsuarioLogado();
     }
@@ -903,6 +1194,8 @@ function getHtmlInterface() {
     function carregarSessoes() {
       document.getElementById('loadingBox').style.display = 'block';
       document.getElementById('cardsGrid').style.display = 'none';
+
+      const emailAtual = usuarioConectado ? usuarioConectado.email : '';
 
       google.script.run
         .withSuccessHandler(function(res) {
@@ -919,7 +1212,7 @@ function getHtmlInterface() {
           document.getElementById('loadingBox').style.display = 'none';
           alert('Erro de conexão: ' + err.message);
         })
-        .obterSessoes();
+        .obterSessoes(emailAtual);
     }
 
     function popularSelectDepartamentos(areas) {
@@ -946,22 +1239,42 @@ function getHtmlInterface() {
 
       sessoes.forEach(function(s) {
         let badgeHtml = '';
-        let btnText = '';
-        let btnClass = '';
+        let btnHtml = '';
 
-        if (!s.lotado) {
-          const restantes = s.vagasRestantes;
-          if (restantes <= 3) {
-            badgeHtml = '<span class="badge bg-warning text-dark badge-vaga"><i class="fa-solid fa-clock me-1"></i>Últimas ' + restantes + ' vagas!</span>';
+        if (s.minhaInscricao && s.minhaInscricao.inscrito) {
+          // O usuário atual já está inscrito nesta sessão!
+          if (s.minhaInscricao.ehConfirmado) {
+            badgeHtml = '<span class="badge bg-success text-white badge-vaga"><i class="fa-solid fa-circle-check me-1"></i>Sua vaga está garantida!</span>';
           } else {
-            badgeHtml = '<span class="badge bg-success badge-vaga"><i class="fa-solid fa-circle-check me-1"></i>' + restantes + ' vagas livres</span>';
+            badgeHtml = '<span class="badge bg-warning text-dark badge-vaga"><i class="fa-solid fa-clock me-1"></i>Você está na Lista de Espera</span>';
           }
-          btnText = 'Garantir Minha Vaga';
-          btnClass = 'btn-primary';
+          btnHtml = \`
+            <button class="btn btn-outline-danger w-100 btn-inscrever" onclick="abrirModalCancelamento('\${s.idSessao}')">
+              <i class="fa-solid fa-arrow-right-from-bracket me-1"></i> Desistir da Vaga
+            </button>
+          \`;
         } else {
-          badgeHtml = '<span class="badge bg-secondary badge-vaga"><i class="fa-solid fa-user-group me-1"></i>Sala Lotada (12/12)</span>';
-          btnText = 'Entrar na Lista de Espera';
-          btnClass = 'btn-outline-warning text-dark fw-bold';
+          // O usuário não está inscrito nesta sessão
+          if (!s.lotado) {
+            const restantes = s.vagasRestantes;
+            if (restantes <= 3) {
+              badgeHtml = '<span class="badge bg-warning text-dark badge-vaga"><i class="fa-solid fa-clock me-1"></i>Últimas ' + restantes + ' vagas!</span>';
+            } else {
+              badgeHtml = '<span class="badge bg-success badge-vaga"><i class="fa-solid fa-circle-check me-1"></i>' + restantes + ' vagas livres</span>';
+            }
+            btnHtml = \`
+              <button class="btn btn-primary w-100 btn-inscrever" onclick="abrirModalInscricao('\${s.idSessao}')">
+                Garantir Minha Vaga
+              </button>
+            \`;
+          } else {
+            badgeHtml = '<span class="badge bg-secondary badge-vaga"><i class="fa-solid fa-user-group me-1"></i>Sala Lotada (12/12)</span>';
+            btnHtml = \`
+              <button class="btn btn-outline-warning text-dark fw-bold w-100 btn-inscrever" onclick="abrirModalInscricao('\${s.idSessao}')">
+                Entrar na Lista de Espera
+              </button>
+            \`;
+          }
         }
 
         // Formatação da data (sem 31/12/1969!)
@@ -989,9 +1302,7 @@ function getHtmlInterface() {
                 <small class="text-muted">\${s.confirmados}/\${s.limite} inscritos</small>
               </div>
               <div class="mt-auto">
-                <button class="btn \${btnClass} w-100 btn-inscrever" onclick="abrirModalInscricao('\${s.idSessao}')">
-                  \${btnText}
-                </button>
+                \${btnHtml}
               </div>
             </div>
           </div>
@@ -1019,7 +1330,6 @@ function getHtmlInterface() {
         aviso.innerHTML = '<i class="fa-solid fa-info-circle me-1"></i> A sala atingiu 12 pessoas. Você entrará na <b>Lista de Espera</b> para a 2ª turma!';
       }
 
-      // Se o usuário já foi identificado pelo Google Workspace
       if (usuarioConectado && usuarioConectado.identificado) {
         document.getElementById('boxAutoIdentificado').style.display = 'block';
         document.getElementById('autoNome').innerText = usuarioConectado.nomeSugerido;
@@ -1040,6 +1350,60 @@ function getHtmlInterface() {
       document.getElementById('btnConfirmar').innerText = sessao.lotado ? 'Entrar na Lista de Espera' : 'Confirmar Vaga';
 
       modalInstance.show();
+    }
+
+    function abrirModalCancelamento(idSessao) {
+      const sessao = sessoesCache.find(s => s.idSessao === idSessao);
+      if (!sessao) return;
+
+      document.getElementById('modalCancelIdSessao').value = sessao.idSessao;
+      document.getElementById('modalCancelArea').innerText = 'Devolutiva: ' + sessao.area;
+      document.getElementById('modalCancelNomeArea').innerText = sessao.area;
+      document.getElementById('modalCancelStatusAtual').innerText = (sessao.minhaInscricao && sessao.minhaInscricao.status) ? sessao.minhaInscricao.status : 'Inscrito';
+
+      document.getElementById('boxConfirmarCancelamento').style.display = 'block';
+      document.getElementById('boxResultadoCancelamento').style.display = 'none';
+      document.getElementById('btnExecutarCancelamento').disabled = false;
+      document.getElementById('btnExecutarCancelamento').innerText = 'Sim, Desistir da Vaga';
+
+      modalCancelInstance.show();
+    }
+
+    function executarCancelamento() {
+      const idSessao = document.getElementById('modalCancelIdSessao').value;
+      const email = (usuarioConectado && usuarioConectado.email) ? usuarioConectado.email : '';
+
+      const btn = document.getElementById('btnExecutarCancelamento');
+      btn.disabled = true;
+      btn.innerText = 'Processando desistência...';
+
+      google.script.run
+        .withSuccessHandler(function(res) {
+          if (res.sucesso) {
+            document.getElementById('boxConfirmarCancelamento').style.display = 'none';
+            const resDiv = document.getElementById('boxResultadoCancelamento');
+            resDiv.innerHTML = \`
+              <div class="alert alert-info text-start">
+                <h5 class="fw-bold"><i class="fa-solid fa-circle-check me-1"></i> Desistência Realizada</h5>
+                <p class="mb-0">\${res.mensagem}</p>
+              </div>
+              <button class="btn btn-secondary btn-sm mt-2" data-bs-dismiss="modal" onclick="carregarSessoes()">
+                Fechar e Atualizar
+              </button>
+            \`;
+            resDiv.style.display = 'block';
+          } else {
+            alert('Atenção: ' + res.erro);
+            btn.disabled = false;
+            btn.innerText = 'Tentar Novamente';
+          }
+        })
+        .withFailureHandler(function(err) {
+          alert('Erro ao cancelar: ' + err.message);
+          btn.disabled = false;
+          btn.innerText = 'Tentar Novamente';
+        })
+        .cancelarInscricao({ idSessao: idSessao, email: email });
     }
 
     function submeterInscricao(event) {
