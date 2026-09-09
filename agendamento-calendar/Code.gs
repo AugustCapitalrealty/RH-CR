@@ -437,7 +437,10 @@ function realizarInscricao(dados) {
           idSessao: sessoesDados[i][0],
           area: sessoesDados[i][1],
           dataHoraStr: dataHoraFormatada,
-          local: sessoesDados[i][5] || 'Sala de Reunião Principal',
+          dataLimpa: dStr,
+          horaIni: hIni,
+          horaFim: hFim,
+          local: sessoesDados[i][5] || SALA_PADRAO,
           limite: Number(sessoesDados[i][6]) || LIMITE_VAGAS_PADRAO,
           confirmados: Number(sessoesDados[i][7]) || 0,
           espera: Number(sessoesDados[i][8]) || 0,
@@ -482,9 +485,9 @@ function realizarInscricao(dados) {
         sessaoEncontrada,
         linhaSessao,
         abaSessoes,
-        dStr,
-        hIni,
-        hFim
+        sessaoEncontrada.dataLimpa,
+        sessaoEncontrada.horaIni,
+        sessaoEncontrada.horaFim
       );
 
       if (eventoCal) {
