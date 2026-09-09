@@ -115,8 +115,12 @@ function onOpen() {
     SpreadsheetApp.getUi()
       .createMenu('🏛️ RH Devolutivas')
       .addItem('🔄 Resetar e Organizar Planilha', 'resetarEConfigurarPlanilha')
+      .addItem('📅 Sincronizar com Google Calendar Agora', 'sincronizarComCalendar')
+      .addItem('⏰ Ativar Sincronização Automática (a cada 1 hora)', 'ativarSincronizacaoAutomatica')
+      .addItem('🛑 Desativar Sincronização Automática', 'desativarSincronizacaoAutomatica')
+      .addSeparator()
+      .addItem('👥 Gerar 2ª Turma para Lista de Espera', 'gerarSegundaTurmaFilaEspera')
       .addItem('🧪 Testar Permissões (E-mail e Agenda)', 'testarPermissoesEEmailCalendar')
-      .addItem('📅 Sincronizar com Google Calendar', 'sincronizarComCalendar')
       .addToUi();
   } catch (e) {}
 }
@@ -864,6 +868,11 @@ function cancelarInscricao(dados) {
         mensagemRetorno = 'Sua vaga foi cancelada com sucesso e liberada para novos interessados.';
       }
 
+      // Remove o participante que desistiu do evento do Google Calendar
+      if (sessaoObj.idEvento) {
+        removerParticipanteDoEvento(sessaoObj.idEvento, emailLimpo, sessaoObj, linhaSessao, abaSessoes);
+      }
+
     } else {
       // O usuário estava apenas na lista de espera
       const novaEspera = Math.max(0, sessaoObj.espera - 1);
@@ -1122,7 +1131,104 @@ function garantirEventoCalendar(sessao, linhaSessao, abaSessoes, dataLimpa, hora
 }
 
 /**
- * Cria ou atualiza os eventos no Calendar para todas as sessões com data preenchida
+ * Remove um participante específico do evento da Google Agenda quando ele desiste
+ */
+function removerParticipanteDoEvento(idEvento, emailRemover, sessaoObj, linhaSessao, abaSessoes) {
+  if (!idEvento || !emailRemover) return;
+  const agenda = getAgendaRH();
+  if (!agenda) return;
+
+  try {
+    let evento = agenda.getEventById(idEvento);
+    if (!evento && idEvento.includes('@')) {
+      evento = agenda.getEventById(idEvento.split('@')[0]);
+    }
+    if (!evento) {
+      try { evento = CalendarApp.getEventById(idEvento); } catch (e) {}
+    }
+    if (!evento) return;
+
+    recriarEventoParaInscritosAtivos(sessaoObj, linhaSessao, abaSessoes, evento);
+    Logger.log('Evento atualizado no Calendar sem o participante ' + emailRemover);
+  } catch (err) {
+    Logger.log('Aviso ao remover participante do Calendar: ' + err.message);
+  }
+}
+
+/**
+ * Recria o evento do Calendar apenas com os participantes confirmados ativos
+ * e remove o evento antigo (notificando cancelamento para quem desistiu)
+ */
+function recriarEventoParaInscritosAtivos(sessaoObj, linhaSessao, abaSessoes, eventoAntigo) {
+  const agenda = getAgendaRH();
+  if (!agenda) return null;
+
+  try {
+    const dados = abaSessoes.getDataRange().getValues();
+    const displayValores = abaSessoes.getDataRange().getDisplayValues();
+    const linhaIdx = linhaSessao - 1;
+
+    const dataLimpa = sanitizarData(dados[linhaIdx][2], displayValores[linhaIdx][2]);
+    const horaIniVal = displayValores[linhaIdx][3] || '14:00';
+    const horaFimVal = displayValores[linhaIdx][4] || '15:00';
+    const local = String(dados[linhaIdx][5] || SALA_PADRAO);
+
+    // Coleta a lista de confirmados ativos na aba Inscricoes
+    const ss = getPlanilhaDB();
+    const abaInscricoes = ss.getSheetByName('Inscricoes');
+    const inscricoesDados = abaInscricoes ? abaInscricoes.getDataRange().getValues() : [];
+    const emailsAtivos = [];
+
+    for (let j = 1; j < inscricoesDados.length; j++) {
+      const sId = String(inscricoesDados[j][1]);
+      const em = String(inscricoesDados[j][4] || '').trim().toLowerCase();
+      const st = String(inscricoesDados[j][6] || '');
+      if (sId === sessaoObj.idSessao && st.startsWith('Confirmado') && em) {
+        emailsAtivos.push(em);
+      }
+    }
+
+    // 1. Deleta o evento antigo (remove do calendar de quem desistiu)
+    if (eventoAntigo) {
+      try {
+        eventoAntigo.deleteEvent();
+      } catch (eDel) {}
+    }
+
+    // 2. Se a sessão tem data, cria o novo evento para os participantes ativos
+    if (dataLimpa && emailsAtivos.length > 0) {
+      const novoSessaoObj = {
+        idSessao: sessaoObj.idSessao,
+        area: sessaoObj.area,
+        local: local,
+        idEvento: ''
+      };
+      const novoEvento = garantirEventoCalendar(novoSessaoObj, linhaSessao, abaSessoes, dataLimpa, horaIniVal, horaFimVal);
+      if (novoEvento) {
+        emailsAtivos.forEach(function(email) {
+          try {
+            novoEvento.addGuest(email);
+          } catch (eG) {}
+        });
+        abaSessoes.getRange(linhaSessao, 10).setValue(novoEvento.getId());
+        Logger.log('Novo evento criado com ' + emailsAtivos.length + ' participante(s) ativo(s).');
+        return novoEvento;
+      }
+    } else {
+      abaSessoes.getRange(linhaSessao, 10).setValue('');
+    }
+  } catch (err) {
+    Logger.log('Erro ao recriar evento para participantes ativos: ' + err.message);
+  }
+  return null;
+}
+
+/**
+ * Sincroniza a Planilha com o Google Calendar:
+ * 1. Cria eventos para novas datas.
+ * 2. Atualiza data/horário/local se o RH mudou na planilha.
+ * 3. Deleta eventos do Calendar se o RH apagou a data na planilha (remove de todos).
+ * 4. Garante que todos os inscritos confirmados estejam convidados.
  */
 function sincronizarComCalendar() {
   const ss = getPlanilhaDB();
@@ -1131,52 +1237,319 @@ function sincronizarComCalendar() {
   const dados = abaSessoes.getDataRange().getValues();
   const displayValores = abaSessoes.getDataRange().getDisplayValues();
   const inscricoesDados = abaInscricoes ? abaInscricoes.getDataRange().getValues() : [];
+  const agenda = getAgendaRH();
+
+  if (!agenda) {
+    throw new Error('Não foi possível acessar a Google Agenda.');
+  }
 
   let criados = 0;
+  let atualizados = 0;
+  let removidos = 0;
   let convidadosTotal = 0;
 
   for (let i = 1; i < dados.length; i++) {
+    const linhaPlanilha = i + 1;
     const row = dados[i];
     const rowDisplay = displayValores[i];
-    const idSessao = String(row[0]);
-    const area = row[1];
+    const idSessao = String(row[0] || '');
+    const area = String(row[1] || '');
     const dataLimpa = sanitizarData(row[2], rowDisplay[2]);
-    const horaIniVal = rowDisplay[3] || '14:00';
-    const horaFimVal = rowDisplay[4] || '15:00';
-    const local = row[5] || SALA_PADRAO;
-    let idEvento = row[9];
+    const horaIniVal = rowDisplay[3] ? rowDisplay[3].trim() : '14:00';
+    const horaFimVal = rowDisplay[4] ? rowDisplay[4].trim() : '15:00';
+    const local = String(row[5] || SALA_PADRAO);
+    let idEvento = String(row[9] || '').trim();
 
+    // 1. Se NÃO tem data na planilha, mas tem ID de evento: O RH cancelou/apagou a data!
+    if (!dataLimpa && idEvento) {
+      try {
+        let eventoParaApagar = agenda.getEventById(idEvento);
+        if (!eventoParaApagar && idEvento.includes('@')) {
+          eventoParaApagar = agenda.getEventById(idEvento.split('@')[0]);
+        }
+        if (eventoParaApagar) {
+          eventoParaApagar.deleteEvent();
+          removidos++;
+          Logger.log('Evento cancelado e removido do Calendar: ' + idSessao + ' (' + area + ')');
+        }
+      } catch (eDel) {
+        Logger.log('Aviso ao apagar evento cancelado: ' + eDel.message);
+      }
+      abaSessoes.getRange(linhaPlanilha, 10).setValue('');
+      continue;
+    }
+
+    // 2. Se tem data definida na planilha:
     if (dataLimpa) {
-      const sessaoObj = {
-        idSessao: idSessao,
-        area: area,
-        local: local,
-        idEvento: idEvento
-      };
+      let dia = 1, mes = 0, ano = 2026;
+      if (dataLimpa.includes('/')) {
+        const partes = dataLimpa.split('/');
+        dia = parseInt(partes[0], 10);
+        mes = parseInt(partes[1], 10) - 1;
+        ano = parseInt(partes[2], 10);
+      } else if (dataLimpa.includes('-')) {
+        const partes = dataLimpa.split('-');
+        ano = parseInt(partes[0], 10);
+        mes = parseInt(partes[1], 10) - 1;
+        dia = parseInt(partes[2], 10);
+      }
 
-      const evento = garantirEventoCalendar(sessaoObj, i + 1, abaSessoes, dataLimpa, horaIniVal, horaFimVal);
+      let hIni = 14, mIni = 0, hFim = 15, mFim = 0;
+      if (horaIniVal && horaIniVal.includes(':')) {
+        const pIni = horaIniVal.split(':');
+        hIni = parseInt(pIni[0], 10); mIni = parseInt(pIni[1], 10);
+      }
+      if (horaFimVal && horaFimVal.includes(':')) {
+        const pFim = horaFimVal.split(':');
+        hFim = parseInt(pFim[0], 10); mFim = parseInt(pFim[1], 10);
+      }
+
+      const inicio = new Date(ano, mes, dia, hIni, mIni, 0);
+      const fim = new Date(ano, mes, dia, hFim, mFim, 0);
+
+      let evento = null;
+      if (idEvento) {
+        evento = agenda.getEventById(idEvento);
+        if (!evento && idEvento.includes('@')) {
+          evento = agenda.getEventById(idEvento.split('@')[0]);
+        }
+      }
 
       if (evento) {
-        if (!idEvento) criados++;
+        // Evento existente: se o RH alterou data, hora ou local, atualiza!
+        const inicioAtual = evento.getStartTime();
+        const fimAtual = evento.getEndTime();
+        if (inicioAtual.getTime() !== inicio.getTime() || fimAtual.getTime() !== fim.getTime()) {
+          evento.setTime(inicio, fim);
+          atualizados++;
+          Logger.log('Horário atualizado no Calendar para: ' + area);
+        }
+        if (evento.getLocation() !== local) {
+          evento.setLocation(local);
+        }
+      } else {
+        // Evento não existe ainda: cria no Calendar!
+        const sessaoObj = {
+          idSessao: idSessao,
+          area: area,
+          local: local,
+          idEvento: ''
+        };
+        evento = garantirEventoCalendar(sessaoObj, linhaPlanilha, abaSessoes, dataLimpa, horaIniVal, horaFimVal);
+        if (evento) {
+          criados++;
+          idEvento = evento.getId();
+        }
+      }
 
-        // Convida todos os inscritos confirmados na planilha
+      // Sincroniza convites dos confirmados
+      if (evento) {
+        const emailsConfirmados = [];
         for (let j = 1; j < inscricoesDados.length; j++) {
-          const sessaoInsc = String(inscricoesDados[j][1]);
-          const emailInsc = String(inscricoesDados[j][4]).trim().toLowerCase();
-          const statusInsc = String(inscricoesDados[j][6]);
+          const sInsc = String(inscricoesDados[j][1]);
+          const emInsc = String(inscricoesDados[j][4] || '').trim().toLowerCase();
+          const stInsc = String(inscricoesDados[j][6] || '');
 
-          if (sessaoInsc === idSessao && statusInsc.startsWith('Confirmado') && emailInsc) {
+          if (sInsc === idSessao && stInsc.startsWith('Confirmado') && emInsc) {
+            emailsConfirmados.push(emInsc);
+          }
+        }
+
+        const convidadosAtuais = evento.getGuestList().map(g => g.getEmail().toLowerCase());
+        emailsConfirmados.forEach(function(emailConf) {
+          if (!convidadosAtuais.includes(emailConf)) {
             try {
-              evento.addGuest(emailInsc);
+              evento.addGuest(emailConf);
               convidadosTotal++;
             } catch (eG) {}
           }
-        }
+        });
       }
     }
   }
 
-  return 'Sincronização concluída! ' + criados + ' novo(s) evento(s) criado(s) e ' + convidadosTotal + ' convite(s) sincronizado(s).';
+  const resumo = 'Sincronização com Calendar concluída!\n' +
+    '• Eventos criados: ' + criados + '\n' +
+    '• Eventos atualizados (data/hora): ' + atualizados + '\n' +
+    '• Eventos cancelados/removidos: ' + removidos + '\n' +
+    '• Novos convites enviados: ' + convidadosTotal;
+
+  Logger.log(resumo);
+
+  try {
+    SpreadsheetApp.getUi().alert('📅 Google Calendar', resumo, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {}
+
+  return resumo;
+}
+
+/**
+ * Ativa a sincronização automática periódica a cada 1 hora
+ */
+function ativarSincronizacaoAutomatica() {
+  desativarSincronizacaoAutomatica();
+  ScriptApp.newTrigger('sincronizarComCalendar')
+    .timeBased()
+    .everyHours(1)
+    .create();
+
+  const msg = '⏰ Sincronização automática ATIVADA com sucesso!\n\n' +
+    'A cada 1 hora o sistema irá sincronizar a planilha com o Google Calendar automaticamente:\n' +
+    '• Se você mudar a data/hora na planilha, o Calendar atualiza.\n' +
+    '• Se você apagar a data de uma sessão, o evento é cancelado no Calendar de todo mundo.\n' +
+    '• Novos inscritos confirmados são convidados automaticamente.';
+
+  Logger.log(msg);
+  try {
+    SpreadsheetApp.getUi().alert('Automação Ativa', msg, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {}
+}
+
+/**
+ * Desativa a sincronização automática periódica
+ */
+function desativarSincronizacaoAutomatica() {
+  const triggers = ScriptApp.getProjectTriggers();
+  let count = 0;
+  triggers.forEach(function(t) {
+    if (t.getHandlerFunction() === 'sincronizarComCalendar') {
+      ScriptApp.deleteTrigger(t);
+      count++;
+    }
+  });
+  const msg = 'Sincronização automática desativada (' + count + ' gatilho(s) removido(s)).';
+  Logger.log(msg);
+  try {
+    SpreadsheetApp.getUi().alert('Automação Desativada', msg, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {}
+}
+
+/**
+ * Cria automaticamente a 2ª Turma para áreas que atingiram lista de espera,
+ * transferindo todos os colaboradores da espera para a nova turma como Confirmados!
+ */
+function gerarSegundaTurmaFilaEspera() {
+  const ss = getPlanilhaDB();
+  const abaSessoes = ss.getSheetByName('Sessoes');
+  const abaInscricoes = ss.getSheetByName('Inscricoes');
+
+  const sessoesDados = abaSessoes.getDataRange().getValues();
+  const inscricoesDados = abaInscricoes ? abaInscricoes.getDataRange().getValues() : [];
+
+  let turmasCriadas = 0;
+  let totalTransferidos = 0;
+  const relatorio = [];
+
+  for (let i = 1; i < sessoesDados.length; i++) {
+    const idSessaoOrig = String(sessoesDados[i][0]);
+    const areaOrig = String(sessoesDados[i][1]);
+    const espera = Number(sessoesDados[i][8]) || 0;
+
+    // Pula se já for 2ª turma
+    if (areaOrig.includes('2ª Turma') || idSessaoOrig.includes('-T2')) continue;
+
+    // Procura colaboradores na fila de espera desta sessão
+    const pessoasFila = [];
+    const linhasInscricoes = [];
+
+    for (let j = 1; j < inscricoesDados.length; j++) {
+      const sId = String(inscricoesDados[j][1]);
+      const st = String(inscricoesDados[j][6]);
+      if (sId === idSessaoOrig && st.startsWith('Lista de Espera')) {
+        pessoasFila.push({
+          nome: inscricoesDados[j][3],
+          email: inscricoesDados[j][4],
+          depto: inscricoesDados[j][5]
+        });
+        linhasInscricoes.push(j + 1);
+      }
+    }
+
+    if (pessoasFila.length > 0) {
+      const novoId = idSessaoOrig + '-T2';
+      const novaArea = areaOrig + ' (2ª Turma)';
+      const novaData = ''; // RH define a data
+      const novoInicio = '15:30';
+      const novoFim = '16:30';
+
+      // 1. Cria a nova linha na aba Sessoes
+      abaSessoes.appendRow([
+        novoId,
+        novaArea,
+        novaData,
+        novoInicio,
+        novoFim,
+        SALA_PADRAO,
+        LIMITE_VAGAS_PADRAO,
+        pessoasFila.length,
+        0,
+        ''
+      ]);
+
+      // 2. Atualiza a inscrição de cada um para a 2ª Turma como Confirmado
+      linhasInscricoes.forEach(function(linha, idx) {
+        const vagaNum = idx + 1;
+        abaInscricoes.getRange(linha, 2).setValue(novoId);
+        abaInscricoes.getRange(linha, 3).setValue(novaArea);
+        abaInscricoes.getRange(linha, 7).setValue('Confirmado (Transferido 2ª Turma - Vaga ' + vagaNum + '/' + LIMITE_VAGAS_PADRAO + ')');
+      });
+
+      // 3. Zera o contador de espera da sessão original
+      abaSessoes.getRange(i + 1, 9).setValue(0);
+
+      // 4. Envia e-mail de notificação avisando da 2ª Turma e vaga garantida
+      pessoasFila.forEach(function(p) {
+        try {
+          const assunto = '🎉 Vaga Confirmada na 2ª Turma: Devolutiva RH — ' + areaOrig;
+          const htmlCorpo = `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
+              <div style="background: linear-gradient(135deg, #16a34a, #15803d); color: #ffffff; padding: 24px; text-align: center;">
+                <span style="background: rgba(255,255,255,0.2); padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold;">RH CAPITAL REALTY</span>
+                <h3 style="margin: 10px 0 0 0; color: #ffffff;">2ª Turma Criada!</h3>
+              </div>
+              <div style="padding: 24px; color: #334155; line-height: 1.6;">
+                <p>Olá, <b>${p.nome}</b>!</p>
+                <p>Devido à grande procura pela <b>pesquisa de satisfação da área de ${areaOrig}</b>, o time de RH abriu uma <b>2ª Turma</b> presencial na Sala Andersen e você foi <b>transferido(a) automaticamente com vaga garantida</b>!</p>
+                <div style="background: #f8fafc; border-left: 4px solid #16a34a; padding: 14px; margin: 16px 0;">
+                  <div><b>Sessão:</b> ${novaArea}</div>
+                  <div><b>Local:</b> ${SALA_PADRAO}</div>
+                  <div><b>Status:</b> <span style="color: #16a34a; font-weight: bold;">Vaga Confirmada</span></div>
+                </div>
+                <p style="font-size: 14px; color: #64748b;">Assim que o RH fixar a data desta 2ª turma, você receberá o convite diretamente na sua Google Agenda.</p>
+              </div>
+              <div style="background-color: #f1f5f9; padding: 14px; text-align: center; font-size: 12px; color: #94a3b8;">
+                Equipe de Recursos Humanos — Capital Realty
+              </div>
+            </div>
+          `;
+          const textoSimples = 'Sua vaga na 2ª Turma da Devolutiva RH (' + areaOrig + ') está confirmada!';
+          const aliasEnvio = obterAliasEnvio();
+          const opcoes = { htmlBody: htmlCorpo, name: NOME_REMETENTE_EMAIL, replyTo: EMAIL_REMETENTE_RH };
+          if (aliasEnvio) opcoes.from = aliasEnvio;
+          GmailApp.sendEmail(p.email, assunto, textoSimples, opcoes);
+        } catch (eM) {}
+      });
+
+      turmasCriadas++;
+      totalTransferidos += pessoasFila.length;
+      relatorio.push(areaOrig + ': ' + pessoasFila.length + ' participante(s) transferido(s)');
+    }
+  }
+
+  let msgFinal = '';
+  if (turmasCriadas > 0) {
+    msgFinal = '🎉 Sucesso! ' + turmasCriadas + ' 2ª Turma(s) criada(s) com ' + totalTransferidos + ' participante(s) transferido(s):\n\n' + relatorio.join('\n') + '\n\nAs novas linhas foram criadas na aba Sessoes e todos os colaboradores já foram notificados por e-mail!';
+  } else {
+    msgFinal = 'ℹ️ Nenhuma área possui colaboradores na Lista de Espera no momento.';
+  }
+
+  Logger.log(msgFinal);
+
+  try {
+    SpreadsheetApp.getUi().alert('👥 2ª Turma para Fila de Espera', msgFinal, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {}
+
+  return msgFinal;
 }
 
 /**
