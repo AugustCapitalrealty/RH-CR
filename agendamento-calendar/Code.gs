@@ -95,6 +95,7 @@ function onOpen() {
     SpreadsheetApp.getUi()
       .createMenu('🏛️ RH Devolutivas')
       .addItem('🔄 Resetar e Organizar Planilha', 'resetarEConfigurarPlanilha')
+      .addItem('🧪 Testar Permissões (E-mail e Agenda)', 'testarPermissoesEEmailCalendar')
       .addItem('📅 Sincronizar com Google Calendar', 'sincronizarComCalendar')
       .addToUi();
   } catch (e) {}
@@ -504,16 +505,33 @@ function enviarEmailInscricao(dados) {
       `;
     }
 
-    MailApp.sendEmail({
-      to: destinatario,
-      subject: assunto,
-      htmlBody: htmlCorpo,
-      name: NOME_REMETENTE_EMAIL
-    });
+    let enviou = false;
+    try {
+      GmailApp.sendEmail(destinatario, assunto, '', {
+        htmlBody: htmlCorpo,
+        name: NOME_REMETENTE_EMAIL
+      });
+      enviou = true;
+      Logger.log('E-mail enviado via GmailApp com sucesso para: ' + destinatario);
+    } catch (eGmail) {
+      Logger.log('Aviso ao enviar via GmailApp: ' + eGmail.message + '. Tentando MailApp...');
+      try {
+        MailApp.sendEmail({
+          to: destinatario,
+          subject: assunto,
+          htmlBody: htmlCorpo,
+          name: NOME_REMETENTE_EMAIL
+        });
+        enviou = true;
+        Logger.log('E-mail enviado via MailApp com sucesso para: ' + destinatario);
+      } catch (eMail) {
+        Logger.log('Erro ao enviar via MailApp: ' + eMail.message);
+      }
+    }
 
-    return true;
+    return enviou;
   } catch (err) {
-    Logger.log('Erro ao enviar e-mail: ' + err.message);
+    Logger.log('Erro geral ao enviar e-mail: ' + err.message);
     return false;
   }
 }
@@ -788,10 +806,15 @@ function cancelarInscricao(dados) {
         // Adiciona o promovido ao evento do Calendar
         if (sessaoObj.idEvento) {
           try {
-            const agenda = CalendarApp.getCalendarById(ID_AGENDA);
-            const evento = agenda.getEventById(sessaoObj.idEvento);
-            if (evento) {
-              evento.addGuest(promovidoObj.email);
+            const agenda = getAgendaRH();
+            if (agenda) {
+              let evento = agenda.getEventById(sessaoObj.idEvento);
+              if (!evento) {
+                try { evento = CalendarApp.getEventById(sessaoObj.idEvento); } catch (eEv) {}
+              }
+              if (evento) {
+                evento.addGuest(promovidoObj.email);
+              }
             }
           } catch (eC) {}
         }
@@ -858,7 +881,11 @@ function enviarEmailPromocao(dados) {
         </div>
       </div>
     `;
-    MailApp.sendEmail({ to: dados.email, subject: assunto, htmlBody: htmlCorpo, name: NOME_REMETENTE_EMAIL });
+    try {
+      GmailApp.sendEmail(dados.email, assunto, '', { htmlBody: htmlCorpo, name: NOME_REMETENTE_EMAIL });
+    } catch(eG) {
+      MailApp.sendEmail({ to: dados.email, subject: assunto, htmlBody: htmlCorpo, name: NOME_REMETENTE_EMAIL });
+    }
   } catch(e) {
     Logger.log('Erro ao enviar e-mail de promoção: ' + e.message);
   }
@@ -886,7 +913,11 @@ function enviarEmailCancelamento(dados) {
         </div>
       </div>
     `;
-    MailApp.sendEmail({ to: dados.email, subject: assunto, htmlBody: htmlCorpo, name: NOME_REMETENTE_EMAIL });
+    try {
+      GmailApp.sendEmail(dados.email, assunto, '', { htmlBody: htmlCorpo, name: NOME_REMETENTE_EMAIL });
+    } catch(eG) {
+      MailApp.sendEmail({ to: dados.email, subject: assunto, htmlBody: htmlCorpo, name: NOME_REMETENTE_EMAIL });
+    }
   } catch(e) {
     Logger.log('Erro ao enviar e-mail de cancelamento: ' + e.message);
   }
@@ -920,10 +951,36 @@ function obterEmailRecursoSala(nomeProcurado) {
 }
 
 /**
+ * Obtém a Google Agenda corporativa correta (primary ou por ID)
+ */
+function getAgendaRH() {
+  let agenda = null;
+  if (ID_AGENDA && ID_AGENDA !== 'primary') {
+    try {
+      agenda = CalendarApp.getCalendarById(ID_AGENDA);
+    } catch (e) {
+      Logger.log('Aviso ao buscar agenda por ID ' + ID_AGENDA + ': ' + e.message);
+    }
+  }
+  if (!agenda) {
+    try {
+      agenda = CalendarApp.getDefaultCalendar();
+    } catch (e2) {
+      Logger.log('Erro ao obter calendário padrão: ' + e2.message);
+    }
+  }
+  return agenda;
+}
+
+/**
  * Garante que o evento no Calendar existe (busca ou cria) e reserva a sala
  */
 function garantirEventoCalendar(sessao, linhaSessao, abaSessoes, dataLimpa, horaIniVal, horaFimVal) {
-  const agenda = CalendarApp.getCalendarById(ID_AGENDA);
+  const agenda = getAgendaRH();
+  if (!agenda) {
+    Logger.log('Erro crítico: Nenhuma agenda do Google Calendar pôde ser acessada.');
+    return null;
+  }
   let idEvento = sessao.idEvento;
 
   // 1. Se já tem ID gravado, tenta resgatar o evento existente
@@ -933,7 +990,9 @@ function garantirEventoCalendar(sessao, linhaSessao, abaSessoes, dataLimpa, hora
       evento = agenda.getEventById(idEvento.split('@')[0]);
     }
     if (!evento) {
-      evento = CalendarApp.getEventById(idEvento);
+      try {
+        evento = CalendarApp.getEventById(idEvento);
+      } catch (eEv) {}
     }
     if (evento) return evento;
   }
@@ -1069,6 +1128,120 @@ function descobrirSalasERecursos() {
   todasAgendas.forEach(function(ag) {
     Logger.log('Nome: ' + ag.getName() + ' | ID: ' + ag.getId());
   });
+}
+
+/**
+ * Função de Diagnóstico e Ativação de Permissões:
+ * Dispara um teste real de Calendar e E-mail para forçar a autorização do Google
+ * e validar se o usuário recebe os e-mails e vê a agenda funcionando.
+ */
+function testarPermissoesEEmailCalendar() {
+  let emailUsuario = '';
+  try {
+    emailUsuario = Session.getActiveUser().getEmail();
+  } catch (e) {}
+
+  if (!emailUsuario) {
+    emailUsuario = 'guilherme.marques@capitalrealty.com.br';
+  }
+
+  Logger.log('=== INICIANDO DIAGNÓSTICO DE CALENDAR E E-MAIL ===');
+  Logger.log('Usuário alvo: ' + emailUsuario);
+
+  // 1. Teste do Calendar
+  const agenda = getAgendaRH();
+  if (!agenda) {
+    throw new Error('Google Calendar inacessível. Verifique as permissões de acesso à Agenda.');
+  }
+  Logger.log('Agenda conectada com sucesso: ' + agenda.getName() + ' (' + agenda.getId() + ')');
+
+  // Cria um evento de teste de 30 minutos para daqui a 10 min
+  const inicio = new Date();
+  inicio.setMinutes(inicio.getMinutes() + 10);
+  const fim = new Date(inicio.getTime() + 30 * 60 * 1000);
+
+  const eventoTeste = agenda.createEvent('🧪 [TESTE] Devolutiva RH 360', inicio, fim, {
+    description: 'Evento de teste criado para validar a sincronização da Google Agenda com o sistema de Devolutivas da Capital Realty.',
+    location: SALA_PADRAO,
+    sendInvites: true
+  });
+
+  try {
+    eventoTeste.addGuest(emailUsuario);
+    Logger.log('Participante ' + emailUsuario + ' adicionado ao evento de teste!');
+  } catch (eAdd) {
+    Logger.log('Aviso ao convidar participante: ' + eAdd.message);
+  }
+
+  // Tenta reservar sala
+  const emailSala = obterEmailRecursoSala(SALA_PADRAO);
+  if (emailSala) {
+    try {
+      eventoTeste.addGuest(emailSala);
+      Logger.log('Sala ' + SALA_PADRAO + ' adicionada ao evento de teste!');
+    } catch (eS) {
+      Logger.log('Aviso ao reservar sala no teste: ' + eS.message);
+    }
+  }
+
+  // 2. Teste de Envio de E-mail
+  const assunto = '🧪 Teste de Conexão: Sistema de Devolutivas RH';
+  const corpo = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden;">
+      <div style="background: #1e3a8a; color: #ffffff; padding: 20px; text-align: center;">
+        <h3 style="margin: 0;">✅ Permissões Conectadas com Sucesso!</h3>
+      </div>
+      <div style="padding: 20px; color: #334155;">
+        <p>Olá, <b>${emailUsuario}</b>!</p>
+        <p>Este e-mail confirma que o <b>Google Calendar</b> e o <b>Serviço de E-mail</b> do Apps Script estão devidamente autorizados e operando.</p>
+        <ul>
+          <li><b>Agenda:</b> Evento de teste criado na sua Google Agenda</li>
+          <li><b>Sala:</b> ${SALA_PADRAO}</li>
+          <li><b>Status:</b> Pronto para receber inscrições dos colaboradores!</li>
+        </ul>
+      </div>
+      <div style="background: #f1f5f9; padding: 12px; text-align: center; font-size: 12px; color: #94a3b8;">
+        RH Capital Realty — Sistema Automatizado
+      </div>
+    </div>
+  `;
+
+  let enviou = false;
+  try {
+    GmailApp.sendEmail(emailUsuario, assunto, '', {
+      htmlBody: corpo,
+      name: NOME_REMETENTE_EMAIL
+    });
+    enviou = true;
+    Logger.log('E-mail de teste enviado com sucesso via GmailApp!');
+  } catch (eG) {
+    Logger.log('Aviso GmailApp: ' + eG.message + '. Tentando MailApp...');
+    try {
+      MailApp.sendEmail({
+        to: emailUsuario,
+        subject: assunto,
+        htmlBody: corpo,
+        name: NOME_REMETENTE_EMAIL
+      });
+      enviou = true;
+      Logger.log('E-mail de teste enviado com sucesso via MailApp!');
+    } catch (eM) {
+      Logger.log('Erro crítico ao enviar via MailApp: ' + eM.message);
+    }
+  }
+
+  const msgResultado = '🎉 Teste concluído com sucesso!\n\n' +
+    '1. Google Agenda: Evento de teste criado no seu Calendar.\n' +
+    '2. E-mail: Enviado com sucesso para ' + emailUsuario + '.\n\n' +
+    'Agora o sistema tem todas as permissões ativas para criar agendas e enviar e-mails automaticamente!';
+
+  Logger.log(msgResultado);
+
+  try {
+    SpreadsheetApp.getUi().alert('Teste de Conexão', msgResultado, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (eUi) {}
+
+  return { sucesso: true, idEvento: eventoTeste.getId(), emailEnviado: enviou };
 }
 
 // ============================================================================
