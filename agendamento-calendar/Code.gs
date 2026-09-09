@@ -24,6 +24,26 @@ const ID_AGENDA = 'primary';
 // Nome de exibição nos e-mails enviados
 const NOME_REMETENTE_EMAIL = 'RH Capital Realty';
 
+// E-mail corporativo do grupo RH (alias de envio configurado no Gmail)
+const EMAIL_REMETENTE_RH = 'rh@capitalrealty.com.br';
+
+/**
+ * Retorna o alias de envio 'rh@capitalrealty.com.br' se estiver configurado no Gmail da conta
+ */
+function obterAliasEnvio() {
+  try {
+    const aliases = GmailApp.getAliases();
+    for (let i = 0; i < aliases.length; i++) {
+      if (aliases[i].toLowerCase().includes('rh@capitalrealty.com.br')) {
+        return aliases[i];
+      }
+    }
+  } catch (e) {
+    Logger.log('Aviso ao consultar aliases: ' + e.message);
+  }
+  return null;
+}
+
 // Sala física padrão no Google Workspace para as devolutivas
 const SALA_PADRAO = 'Sala Andersen';
 
@@ -507,13 +527,20 @@ function enviarEmailInscricao(dados) {
 
     const textoSimples = 'Inscrição para a Devolutiva da Pesquisa RH 360 — Capital Realty (' + area + ').';
     let enviou = false;
+    const aliasEnvio = obterAliasEnvio();
+
     try {
-      GmailApp.sendEmail(destinatario, assunto, textoSimples, {
+      const opcoesGmail = {
         htmlBody: htmlCorpo,
-        name: NOME_REMETENTE_EMAIL
-      });
+        name: NOME_REMETENTE_EMAIL,
+        replyTo: EMAIL_REMETENTE_RH
+      };
+      if (aliasEnvio) {
+        opcoesGmail.from = aliasEnvio;
+      }
+      GmailApp.sendEmail(destinatario, assunto, textoSimples, opcoesGmail);
       enviou = true;
-      Logger.log('E-mail enviado via GmailApp com sucesso para: ' + destinatario);
+      Logger.log('E-mail enviado via GmailApp (remetente: ' + (aliasEnvio || 'padrão') + ') com sucesso para: ' + destinatario);
     } catch (eGmail) {
       Logger.log('Aviso ao enviar via GmailApp: ' + eGmail.message + '. Tentando MailApp...');
       try {
@@ -522,7 +549,8 @@ function enviarEmailInscricao(dados) {
           subject: assunto,
           body: textoSimples,
           htmlBody: htmlCorpo,
-          name: NOME_REMETENTE_EMAIL
+          name: NOME_REMETENTE_EMAIL,
+          replyTo: EMAIL_REMETENTE_RH
         });
         enviou = true;
         Logger.log('E-mail enviado via MailApp com sucesso para: ' + destinatario);
@@ -884,10 +912,24 @@ function enviarEmailPromocao(dados) {
       </div>
     `;
     const textoSimples = 'Boa notícia! Você foi promovido(a) com vaga garantida na Devolutiva RH (' + dados.area + ').';
+    const aliasEnvio = obterAliasEnvio();
     try {
-      GmailApp.sendEmail(dados.email, assunto, textoSimples, { htmlBody: htmlCorpo, name: NOME_REMETENTE_EMAIL });
+      const opcoes = {
+        htmlBody: htmlCorpo,
+        name: NOME_REMETENTE_EMAIL,
+        replyTo: EMAIL_REMETENTE_RH
+      };
+      if (aliasEnvio) opcoes.from = aliasEnvio;
+      GmailApp.sendEmail(dados.email, assunto, textoSimples, opcoes);
     } catch(eG) {
-      MailApp.sendEmail({ to: dados.email, subject: assunto, body: textoSimples, htmlBody: htmlCorpo, name: NOME_REMETENTE_EMAIL });
+      MailApp.sendEmail({
+        to: dados.email,
+        subject: assunto,
+        body: textoSimples,
+        htmlBody: htmlCorpo,
+        name: NOME_REMETENTE_EMAIL,
+        replyTo: EMAIL_REMETENTE_RH
+      });
     }
   } catch(e) {
     Logger.log('Erro ao enviar e-mail de promoção: ' + e.message);
@@ -917,10 +959,24 @@ function enviarEmailCancelamento(dados) {
       </div>
     `;
     const textoSimples = 'Confirmação de cancelamento da inscrição para a Devolutiva RH (' + dados.area + ').';
+    const aliasEnvio = obterAliasEnvio();
     try {
-      GmailApp.sendEmail(dados.email, assunto, textoSimples, { htmlBody: htmlCorpo, name: NOME_REMETENTE_EMAIL });
+      const opcoes = {
+        htmlBody: htmlCorpo,
+        name: NOME_REMETENTE_EMAIL,
+        replyTo: EMAIL_REMETENTE_RH
+      };
+      if (aliasEnvio) opcoes.from = aliasEnvio;
+      GmailApp.sendEmail(dados.email, assunto, textoSimples, opcoes);
     } catch(eG) {
-      MailApp.sendEmail({ to: dados.email, subject: assunto, body: textoSimples, htmlBody: htmlCorpo, name: NOME_REMETENTE_EMAIL });
+      MailApp.sendEmail({
+        to: dados.email,
+        subject: assunto,
+        body: textoSimples,
+        htmlBody: htmlCorpo,
+        name: NOME_REMETENTE_EMAIL,
+        replyTo: EMAIL_REMETENTE_RH
+      });
     }
   } catch(e) {
     Logger.log('Erro ao enviar e-mail de cancelamento: ' + e.message);
@@ -1211,21 +1267,29 @@ function testarPermissoesEEmailCalendar() {
   `;
 
   let enviou = false;
+  const aliasRH = obterAliasEnvio();
+  Logger.log('Alias de envio detectado: ' + (aliasRH ? aliasRH : 'Nenhum (usando e-mail da conta)'));
+
   try {
-    GmailApp.sendEmail(emailUsuario, assunto, '', {
+    const opcoesTeste = {
       htmlBody: corpo,
-      name: NOME_REMETENTE_EMAIL
-    });
+      name: NOME_REMETENTE_EMAIL,
+      replyTo: EMAIL_REMETENTE_RH
+    };
+    if (aliasRH) opcoesTeste.from = aliasRH;
+    GmailApp.sendEmail(emailUsuario, assunto, 'Teste de conexão do sistema de Devolutivas RH.', opcoesTeste);
     enviou = true;
-    Logger.log('E-mail de teste enviado com sucesso via GmailApp!');
+    Logger.log('E-mail de teste enviado com sucesso via GmailApp (remetente: ' + (aliasRH || emailUsuario) + ')!');
   } catch (eG) {
     Logger.log('Aviso GmailApp: ' + eG.message + '. Tentando MailApp...');
     try {
       MailApp.sendEmail({
         to: emailUsuario,
         subject: assunto,
+        body: 'Teste de conexão do sistema de Devolutivas RH.',
         htmlBody: corpo,
-        name: NOME_REMETENTE_EMAIL
+        name: NOME_REMETENTE_EMAIL,
+        replyTo: EMAIL_REMETENTE_RH
       });
       enviou = true;
       Logger.log('E-mail de teste enviado com sucesso via MailApp!');
