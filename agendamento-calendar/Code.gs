@@ -8,10 +8,11 @@
  * - Capacidade máxima da sala: 12 pessoas por sessão.
  * - Primeiros 12 inscritos: Vaga Confirmada + convite automático no Google Calendar.
  * - A partir do 13º: Inscrição na Lista de Espera (para formação de 2ª turma).
+ * - Identificação automática do colaborador via Google Workspace (sem precisar digitar).
  * - Banco de dados em Google Sheets e sincronização com Google Calendar.
  */
 
-// ID da Planilha do Google Sheets (deixe vazio '' para criar uma nova automaticamente ao inicializar)
+// ID da Planilha do Google Sheets (deixe vazio '' para usar a criada automaticamente)
 const ID_PLANILHA = '';
 
 // Limite de pessoas por sessão (capacidade da sala)
@@ -48,27 +49,49 @@ function doGet(e) {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
+/**
+ * Retorna o usuário corporativo logado no Google Workspace
+ */
+function obterUsuarioLogado() {
+  try {
+    const email = Session.getActiveUser().getEmail();
+    let nomeSugerido = '';
+    
+    if (email) {
+      // Extrai nome a partir do formato nome.sobrenome@empresa.com.br
+      const usuario = email.split('@')[0];
+      const partes = usuario.split(/[._-]/);
+      nomeSugerido = partes.map(function(p) {
+        return p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
+      }).join(' ');
+    }
+
+    return {
+      sucesso: true,
+      email: email || '',
+      nomeSugerido: nomeSugerido || '',
+      identificado: Boolean(email && email.trim() !== '')
+    };
+  } catch (err) {
+    return { sucesso: false, email: '', nomeSugerido: '', identificado: false };
+  }
+}
+
 // ============================================================================
 // 2. BANCO DE DADOS (GOOGLE SHEETS)
 // ============================================================================
 
-/**
- * Retorna a planilha ativa de banco de dados
- */
 function getPlanilhaDB() {
   let id = ID_PLANILHA;
   if (!id) {
     id = PropertiesService.getScriptProperties().getProperty('ID_PLANILHA');
   }
   if (!id) {
-    throw new Error('A planilha ainda não foi configurada. Execute a função "inicializarSistema()" no Apps Script primeiro.');
+    throw new Error('A planilha ainda não foi configurada. Execute a função "inicializarSistema()" primeiro.');
   }
   return SpreadsheetApp.openById(id);
 }
 
-/**
- * Cria a planilha e as abas iniciais se ainda não existirem
- */
 function inicializarSistema() {
   let ss;
   let id = ID_PLANILHA || PropertiesService.getScriptProperties().getProperty('ID_PLANILHA');
@@ -100,18 +123,17 @@ function inicializarSistema() {
       'ID_Evento_Calendar'
     ]]).setFontWeight('bold').setBackground('#1e3a8a').setFontColor('#ffffff');
 
-    // Popula as 13 áreas como sessões iniciais
     const dadosIniciais = AREAS_EMPRESA.map((area, index) => [
       'SES-' + String(index + 1).padStart(2, '0'),
       area,
       '',         // Data a preencher pelo RH
-      '10:00',    // Horário padrão
-      '11:00',
+      '14:00',    // Horário padrão
+      '15:00',
       'Sala de Reunião Principal (Presencial)',
       LIMITE_VAGAS_PADRAO,
-      0,          // Inscritos iniciais
-      0,          // Espera inicial
-      ''          // ID do evento Calendar
+      0,
+      0,
+      ''
     ]);
 
     abaSessoes.getRange(2, 1, dadosIniciais.length, 10).setValues(dadosIniciais);
@@ -134,7 +156,6 @@ function inicializarSistema() {
     abaInscricoes.autoResizeColumns(1, 7);
   }
 
-  // Remove aba padrão se existir
   const abaPadrao = ss.getSheetByName('Página1') || ss.getSheetByName('Sheet1');
   if (abaPadrao && ss.getSheets().length > 1) {
     try { ss.deleteSheet(abaPadrao); } catch (e) {}
@@ -144,12 +165,37 @@ function inicializarSistema() {
 }
 
 // ============================================================================
-// 3. CONSULTA DE SESSÕES (FRONTEND)
+// 3. CONSULTA DE SESSÕES (CORREÇÃO DE DATA E DISPLAY)
 // ============================================================================
 
 /**
- * Retorna todas as sessões para exibição no formulário
+ * Trata e formata a data da planilha para evitar o erro 31/12/1969
  */
+function sanitizarData(valorBruto, valorTexto) {
+  const txt = valorTexto ? String(valorTexto).trim() : '';
+  
+  // 1. Se a célula de texto estiver vazia ou com traço
+  if (!txt || txt === '-' || txt === '0') return '';
+
+  // 2. Se for formato DD/MM/AAAA ou AAAA-MM-DD
+  if (txt.includes('/') || txt.includes('-')) {
+    // Garante que não é apenas hora (ex: 14:00)
+    if (!/^\d{1,2}:\d{2}/.test(txt)) {
+      return txt;
+    }
+  }
+
+  // 3. Se for objeto Date do Apps Script
+  if (valorBruto instanceof Date && !isNaN(valorBruto.getTime())) {
+    const ano = valorBruto.getFullYear();
+    // Se o ano for menor que 2000 (ex: 1969, 1899), a célula continha apenas hora
+    if (ano < 2000) return '';
+    return Utilities.formatDate(valorBruto, Session.getScriptTimeZone(), 'dd/MM/yyyy');
+  }
+
+  return txt;
+}
+
 function obterSessoes() {
   try {
     const ss = getPlanilhaDB();
@@ -157,19 +203,25 @@ function obterSessoes() {
     if (!abaSessoes) throw new Error('Aba "Sessoes" não encontrada.');
 
     const valores = abaSessoes.getDataRange().getValues();
+    const displayValores = abaSessoes.getDataRange().getDisplayValues();
+
     if (valores.length <= 1) return { sucesso: true, sessoes: [] };
 
     const sessoes = [];
     for (let i = 1; i < valores.length; i++) {
       const row = valores[i];
+      const rowDisplay = displayValores[i];
+
       const idSessao = String(row[0]);
       const area = String(row[1]);
-      let dataStr = row[2] ? Utilities.formatDate(new Date(row[2]), Session.getScriptTimeZone(), 'dd/MM/yyyy') : '';
-      if (!dataStr && typeof row[2] === 'string') dataStr = row[2];
 
-      const horaInicio = row[3] ? (row[3] instanceof Date ? Utilities.formatDate(row[3], Session.getScriptTimeZone(), 'HH:mm') : String(row[3])) : '';
-      const horaFim = row[4] ? (row[4] instanceof Date ? Utilities.formatDate(row[4], Session.getScriptTimeZone(), 'HH:mm') : String(row[4])) : '';
-      const local = String(row[5] || 'Sala de Reunião');
+      // Sanitiza a data para nunca dar 31/12/1969
+      const dataStr = sanitizarData(row[2], rowDisplay[2]);
+
+      // Horários
+      const horaInicio = rowDisplay[3] ? rowDisplay[3].trim() : '';
+      const horaFim = rowDisplay[4] ? rowDisplay[4].trim() : '';
+      const local = String(row[5] || 'Sala de Reunião Principal');
       const limite = Number(row[6]) || LIMITE_VAGAS_PADRAO;
       const confirmados = Number(row[7]) || 0;
       const espera = Number(row[8]) || 0;
@@ -178,11 +230,17 @@ function obterSessoes() {
       const vagasRestantes = Math.max(0, limite - confirmados);
       const lotado = confirmados >= limite;
 
+      let horarioFormatado = '';
+      if (horaInicio) {
+        horarioFormatado = horaInicio + (horaFim ? ' às ' + horaFim : '');
+      }
+
       sessoes.push({
         idSessao: idSessao,
         area: area,
-        data: dataStr,
-        horario: horaInicio ? (horaInicio + (horaFim ? ' às ' + horaFim : '')) : 'A definir pelo RH',
+        data: dataStr, // Retorna '' se não tiver data definida
+        temDataDefinida: Boolean(dataStr),
+        horario: horarioFormatado,
         local: local,
         limite: limite,
         confirmados: confirmados,
@@ -203,18 +261,25 @@ function obterSessoes() {
 // 4. PROCESSAMENTO DE INSCRIÇÃO
 // ============================================================================
 
-/**
- * Processa a inscrição do colaborador
- */
 function realizarInscricao(dados) {
   try {
     // dados = { idSessao, nome, email, departamento }
-    if (!dados.idSessao || !dados.nome || !dados.email) {
-      throw new Error('Preencha todos os campos obrigatórios.');
+    let emailLimpo = (dados.email || '').trim().toLowerCase();
+    let nomeLimpo = (dados.nome || '').trim();
+
+    // Se o e-mail não veio do frontend, tenta obter da sessão corporativa
+    if (!emailLimpo) {
+      emailLimpo = Session.getActiveUser().getEmail().toLowerCase().trim();
+    }
+    if (!nomeLimpo && emailLimpo) {
+      const usuario = emailLimpo.split('@')[0];
+      nomeLimpo = usuario.split(/[._-]/).map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
     }
 
-    const emailLimpo = dados.email.trim().toLowerCase();
-    const nomeLimpo = dados.nome.trim();
+    if (!dados.idSessao || !emailLimpo) {
+      throw new Error('Identificação do colaborador ou sessão não informada.');
+    }
+
     const deptoLimpo = dados.departamento || '-';
 
     const ss = getPlanilhaDB();
@@ -268,7 +333,7 @@ function realizarInscricao(dados) {
       // Atualiza contador na aba Sessoes
       abaSessoes.getRange(linhaSessao, 8).setValue(numVaga);
 
-      // Se houver evento do Google Calendar vinculado, adiciona como convidado
+      // Adiciona convidado no Calendar se o evento já existir
       if (sessaoEncontrada.idEvento) {
         try {
           const agenda = CalendarApp.getCalendarById(ID_AGENDA);
@@ -277,7 +342,7 @@ function realizarInscricao(dados) {
             evento.addGuest(emailLimpo);
           }
         } catch (eCal) {
-          Logger.log('Erro ao adicionar convidado no Calendar: ' + eCal.message);
+          Logger.log('Erro ao convidar no Calendar: ' + eCal.message);
         }
       }
     } else {
@@ -286,7 +351,7 @@ function realizarInscricao(dados) {
       const numEspera = sessaoEncontrada.espera + 1;
       statusFinal = 'Lista de Espera (Posição ' + numEspera + ')';
 
-      // Atualiza contador na aba Sessoes
+      // Atualiza contador de espera na aba Sessoes
       abaSessoes.getRange(linhaSessao, 9).setValue(numEspera);
     }
 
@@ -307,8 +372,8 @@ function realizarInscricao(dados) {
       area: sessaoEncontrada.area,
       status: statusFinal,
       mensagem: ehConfirmado
-        ? '🎉 Inscrição confirmada com sucesso! Sua vaga está garantida (limite de 12 pessoas).'
-        : '⚠️ A sala atingiu o limite de 12 vagas. Sua inscrição foi registrada com prioridade na LISTA DE ESPERA para a 2ª turma!'
+        ? '🎉 Inscrição confirmada com sucesso! Sua vaga na sala está garantida (limite de 12 pessoas).'
+        : '⚠️ A sala atingiu o limite de 12 vagas presenciais. Sua inscrição foi registrada com prioridade na LISTA DE ESPERA para a 2ª turma!'
     };
   } catch (err) {
     return { sucesso: false, erro: err.message };
@@ -319,48 +384,53 @@ function realizarInscricao(dados) {
 // 5. SINCRONIZAÇÃO COM GOOGLE CALENDAR
 // ============================================================================
 
-/**
- * Cria os eventos na Google Agenda com base nas datas preenchidas na planilha
- */
 function sincronizarComCalendar() {
   const ss = getPlanilhaDB();
   const abaSessoes = ss.getSheetByName('Sessoes');
   const dados = abaSessoes.getDataRange().getValues();
+  const displayValores = abaSessoes.getDataRange().getDisplayValues();
   const agenda = CalendarApp.getCalendarById(ID_AGENDA);
 
   let criados = 0;
 
   for (let i = 1; i < dados.length; i++) {
     const row = dados[i];
+    const rowDisplay = displayValores[i];
     const area = row[1];
-    const dataVal = row[2];
-    const horaIniVal = row[3];
-    const horaFimVal = row[4];
+    const dataLimpa = sanitizarData(row[2], rowDisplay[2]);
+    const horaIniVal = rowDisplay[3] || '14:00';
+    const horaFimVal = rowDisplay[4] || '15:00';
     const local = row[5] || 'Sala de Reunião';
     let idEvento = row[9];
 
-    // Só cria se tiver data preenchida e ainda não tiver ID de evento
-    if (dataVal && !idEvento) {
+    if (dataLimpa && !idEvento) {
       try {
-        const d = new Date(dataVal);
-        let horaIni = 10, minIni = 0, horaFim = 11, minFim = 0;
-
-        if (horaIniVal) {
-          const partes = String(horaIniVal).split(':');
-          if (partes.length >= 2) { horaIni = parseInt(partes[0], 10); minIni = parseInt(partes[1], 10); }
+        let dia = 1, mes = 0, ano = 2026;
+        if (dataLimpa.includes('/')) {
+          const partes = dataLimpa.split('/');
+          dia = parseInt(partes[0], 10);
+          mes = parseInt(partes[1], 10) - 1;
+          ano = parseInt(partes[2], 10);
+        } else if (dataLimpa.includes('-')) {
+          const partes = dataLimpa.split('-');
+          ano = parseInt(partes[0], 10);
+          mes = parseInt(partes[1], 10) - 1;
+          dia = parseInt(partes[2], 10);
         }
-        if (horaFimVal) {
-          const partesFim = String(horaFimVal).split(':');
-          if (partesFim.length >= 2) { horaFim = parseInt(partesFim[0], 10); minFim = parseInt(partesFim[1], 10); }
-        }
 
-        const dataInicio = new Date(d.getFullYear(), d.getMonth(), d.getDate(), horaIni, minIni, 0);
-        const dataTermino = new Date(d.getFullYear(), d.getMonth(), d.getDate(), horaFim, minFim, 0);
+        let horaIni = 14, minIni = 0, horaFim = 15, minFim = 0;
+        const pIni = horaIniVal.split(':');
+        if (pIni.length >= 2) { horaIni = parseInt(pIni[0], 10); minIni = parseInt(pIni[1], 10); }
+        const pFim = horaFimVal.split(':');
+        if (pFim.length >= 2) { horaFim = parseInt(pFim[0], 10); minFim = parseInt(pFim[1], 10); }
+
+        const inicio = new Date(ano, mes, dia, horaIni, minIni, 0);
+        const fim = new Date(ano, mes, dia, horaFim, minFim, 0);
 
         const titulo = '📊 Devolutiva Pesquisa RH — ' + area;
-        const descricao = 'Apresentação aberta dos resultados da Pesquisa de Clima / RH para a área: ' + area + '.\n\nCapacidade máxima da sala: ' + LIMITE_VAGAS_PADRAO + ' pessoas.';
+        const descricao = 'Apresentação aberta dos resultados da Pesquisa RH 360 para a área: ' + area + '.\n\nCapacidade máxima da sala: ' + LIMITE_VAGAS_PADRAO + ' pessoas.';
 
-        const evento = agenda.createEvent(titulo, dataInicio, dataTermino, {
+        const evento = agenda.createEvent(titulo, inicio, fim, {
           location: local,
           description: descricao,
           sendInvites: true
@@ -378,7 +448,7 @@ function sincronizarComCalendar() {
 }
 
 // ============================================================================
-// 6. INTERFACE HTML (FRONTEND RESPONSIVO)
+// 6. INTERFACE HTML (FRONTEND COM IDENTIFICAÇÃO AUTOMÁTICA)
 // ============================================================================
 
 function getHtmlInterface() {
@@ -396,17 +466,28 @@ function getHtmlInterface() {
       --cr-accent: #2563eb;
     }
     body {
-      background-color: #f1f5f9;
+      background-color: #f8fafc;
       font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
       color: #1e293b;
     }
     .hero-banner {
       background: linear-gradient(135deg, var(--cr-blue), var(--cr-blue-light));
       color: white;
-      padding: 40px 20px;
+      padding: 35px 20px;
       border-radius: 0 0 24px 24px;
       box-shadow: 0 10px 25px rgba(15, 43, 92, 0.15);
-      margin-bottom: 30px;
+      margin-bottom: 25px;
+    }
+    .user-pill {
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.25);
+      padding: 6px 16px;
+      border-radius: 30px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.9rem;
+      backdrop-filter: blur(4px);
     }
     .card-sessao {
       border: none;
@@ -449,10 +530,18 @@ function getHtmlInterface() {
         <i class="fa-solid fa-users me-1"></i> RH Capital Realty
       </span>
       <h2 class="fw-bold mb-2">Devolutivas Abertas — Pesquisa RH 360</h2>
-      <p class="lead opacity-90 mb-0" style="font-size: 1.05rem;">
+      <p class="lead opacity-90 mb-3" style="font-size: 1.05rem;">
         Participe da apresentação de resultados das áreas. <br>
-        <span class="fw-bold text-warning"><i class="fa-solid fa-triangle-exclamation me-1"></i> Capacidade limitada a 12 pessoas por sessão</span> (ordem de inscrição).
+        <span class="fw-bold text-warning"><i class="fa-solid fa-triangle-exclamation me-1"></i> Limite de 12 pessoas na sala</span> (ordem de inscrição).
       </p>
+
+      <!-- Identificação do Usuário Logado -->
+      <div id="boxUsuarioLogado" style="display: none;">
+        <div class="user-pill">
+          <i class="fa-solid fa-circle-user text-warning"></i>
+          <span>Conectado como: <b id="lblNomeUsuario">-</b> (<span id="lblEmailUsuario">-</span>)</span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -465,7 +554,7 @@ function getHtmlInterface() {
         <p class="text-muted mb-0 small">As primeiras 12 pessoas garantem vaga na sala. Inscrições excedentes entram na lista de espera para a 2ª turma.</p>
       </div>
       <button class="btn btn-outline-secondary btn-sm rounded-pill" onclick="carregarSessoes()">
-        <i class="fa-solid fa-arrows-rotate me-1"></i> Atualizar Vagas
+        <i class="fa-solid fa-arrows-rotate me-1"></i> Atualizar
       </button>
     </div>
 
@@ -480,7 +569,7 @@ function getHtmlInterface() {
 
   </div>
 
-  <!-- Modal de Inscrição -->
+  <!-- Modal de Inscrição Rápida -->
   <div class="modal fade" id="modalInscricao" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content border-0 shadow-lg" style="border-radius: 16px;">
@@ -496,23 +585,41 @@ function getHtmlInterface() {
           
           <form id="formInscricao" onsubmit="submeterInscricao(event)">
             <input type="hidden" id="modalIdSessao">
-            <div class="mb-3">
-              <label class="form-label fw-bold small">Nome Completo *</label>
-              <input type="text" id="inputNome" class="form-control" required placeholder="Digite seu nome">
+
+            <!-- Quando identificado automaticamente via Google Workspace -->
+            <div id="boxAutoIdentificado" class="card bg-light border-0 p-3 mb-3" style="display:none; border-radius: 12px;">
+              <div class="d-flex align-items-center gap-3">
+                <div class="fs-2 text-primary"><i class="fa-solid fa-id-badge"></i></div>
+                <div>
+                  <div class="fw-bold" id="autoNome">Nome</div>
+                  <div class="small text-muted" id="autoEmail">email@capitalrealty.com.br</div>
+                  <span class="badge bg-success mt-1" style="font-size:0.75rem;"><i class="fa-solid fa-check me-1"></i>Identificado pelo Google</span>
+                </div>
+              </div>
             </div>
-            <div class="mb-3">
-              <label class="form-label fw-bold small">E-mail Corporativo *</label>
-              <input type="email" id="inputEmail" class="form-control" required placeholder="seu.email@capitalrealty.com.br">
+
+            <!-- Campos manuais se não for possível obter pelo Google Workspace -->
+            <div id="boxCamposManuais">
+              <div class="mb-3">
+                <label class="form-label fw-bold small">Nome Completo *</label>
+                <input type="text" id="inputNome" class="form-control" placeholder="Digite seu nome">
+              </div>
+              <div class="mb-3">
+                <label class="form-label fw-bold small">E-mail Corporativo *</label>
+                <input type="email" id="inputEmail" class="form-control" placeholder="seu.email@capitalrealty.com.br">
+              </div>
             </div>
+
             <div class="mb-3">
               <label class="form-label fw-bold small">Seu Departamento *</label>
               <select id="selectDepto" class="form-select" required>
                 <option value="">Selecione sua área...</option>
               </select>
             </div>
+
             <div class="d-grid mt-4">
               <button type="submit" class="btn btn-primary btn-inscrever" id="btnConfirmar">
-                Confirmar Inscrição
+                Confirmar Minha Vaga
               </button>
             </div>
           </form>
@@ -527,11 +634,26 @@ function getHtmlInterface() {
   <script>
     let sessoesCache = [];
     let modalInstance = null;
+    let usuarioConectado = null;
 
     window.onload = function() {
       modalInstance = new bootstrap.Modal(document.getElementById('modalInscricao'));
+      detectarUsuario();
       carregarSessoes();
     };
+
+    function detectarUsuario() {
+      google.script.run
+        .withSuccessHandler(function(res) {
+          if (res && res.identificado) {
+            usuarioConectado = res;
+            document.getElementById('lblNomeUsuario').innerText = res.nomeSugerido || res.email;
+            document.getElementById('lblEmailUsuario').innerText = res.email;
+            document.getElementById('boxUsuarioLogado').style.display = 'block';
+          }
+        })
+        .obterUsuarioLogado();
+    }
 
     function carregarSessoes() {
       document.getElementById('loadingBox').style.display = 'block';
@@ -597,19 +719,25 @@ function getHtmlInterface() {
           btnClass = 'btn-outline-warning text-dark fw-bold';
         }
 
-        const dataFormatada = s.data ? ('📅 ' + s.data + ' — ⏰ ' + s.horario) : '📅 Data e horário a definir pelo RH';
+        // Formatação da data (sem 31/12/1969!)
+        let dataFormatada = '';
+        if (s.temDataDefinida) {
+          dataFormatada = '🗓️ ' + s.data + (s.horario ? ' — ⏰ ' + s.horario : '');
+        } else {
+          dataFormatada = '<span class="text-muted"><i class="fa-regular fa-calendar me-1"></i>Data a definir pelo RH</span>';
+        }
 
         const col = document.createElement('div');
         col.className = 'col-md-6 col-lg-4';
         col.innerHTML = \`
           <div class="card card-sessao">
             <div class="card-body p-4">
-              <div class="d-flex justify-content-between align-items-start mb-3">
+              <div class="d-flex justify-content-between align-items-start mb-2">
                 <h5 class="fw-bold mb-0 text-dark">\${s.area}</h5>
               </div>
-              <div class="mb-3 text-muted small">
+              <div class="mb-3 small">
                 \${dataFormatada} <br>
-                <i class="fa-solid fa-location-dot text-danger me-1"></i> \${s.local}
+                <span class="text-muted"><i class="fa-solid fa-location-dot text-danger me-1"></i>\${s.local}</span>
               </div>
               <div class="d-flex align-items-center justify-content-between mb-4">
                 \${badgeHtml}
@@ -635,7 +763,7 @@ function getHtmlInterface() {
 
       document.getElementById('modalIdSessao').value = sessao.idSessao;
       document.getElementById('modalAreaTitulo').innerText = 'Devolutiva: ' + sessao.area;
-      document.getElementById('modalInfoData').innerText = sessao.data ? (sessao.data + ' às ' + sessao.horario) : 'Data em definição pelo RH';
+      document.getElementById('modalInfoData').innerText = sessao.temDataDefinida ? (sessao.data + (sessao.horario ? ' às ' + sessao.horario : '')) : 'Data em definição pelo RH';
 
       const aviso = document.getElementById('modalAvisoStatus');
       if (!sessao.lotado) {
@@ -644,6 +772,21 @@ function getHtmlInterface() {
       } else {
         aviso.className = 'alert alert-warning small py-2 text-dark';
         aviso.innerHTML = '<i class="fa-solid fa-info-circle me-1"></i> A sala atingiu 12 pessoas. Você entrará na <b>Lista de Espera</b> para a 2ª turma!';
+      }
+
+      // Se o usuário já foi identificado pelo Google Workspace
+      if (usuarioConectado && usuarioConectado.identificado) {
+        document.getElementById('boxAutoIdentificado').style.display = 'block';
+        document.getElementById('autoNome').innerText = usuarioConectado.nomeSugerido;
+        document.getElementById('autoEmail').innerText = usuarioConectado.email;
+        document.getElementById('boxCamposManuais').style.display = 'none';
+        document.getElementById('inputNome').required = false;
+        document.getElementById('inputEmail').required = false;
+      } else {
+        document.getElementById('boxAutoIdentificado').style.display = 'none';
+        document.getElementById('boxCamposManuais').style.display = 'block';
+        document.getElementById('inputNome').required = true;
+        document.getElementById('inputEmail').required = true;
       }
 
       document.getElementById('formInscricao').style.display = 'block';
@@ -657,9 +800,18 @@ function getHtmlInterface() {
     function submeterInscricao(event) {
       event.preventDefault();
       const idSessao = document.getElementById('modalIdSessao').value;
-      const nome = document.getElementById('inputNome').value.trim();
-      const email = document.getElementById('inputEmail').value.trim();
       const departamento = document.getElementById('selectDepto').value;
+
+      let nome = '';
+      let email = '';
+
+      if (usuarioConectado && usuarioConectado.identificado) {
+        nome = usuarioConectado.nomeSugerido;
+        email = usuarioConectado.email;
+      } else {
+        nome = document.getElementById('inputNome').value.trim();
+        email = document.getElementById('inputEmail').value.trim();
+      }
 
       const btn = document.getElementById('btnConfirmar');
       btn.disabled = true;
