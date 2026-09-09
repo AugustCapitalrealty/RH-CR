@@ -21,6 +21,9 @@ const LIMITE_VAGAS_PADRAO = 12;
 // ID da Agenda do Google Calendar ('primary' para agenda principal da conta ou e-mail de agenda compartilhada)
 const ID_AGENDA = 'primary';
 
+// Nome de exibição nos e-mails enviados
+const NOME_REMETENTE_EMAIL = 'RH Capital Realty';
+
 // Lista das 13 Áreas da Capital Realty
 const AREAS_EMPRESA = [
   "Planejamento & Gestão",
@@ -258,7 +261,103 @@ function obterSessoes() {
 }
 
 // ============================================================================
-// 4. PROCESSAMENTO DE INSCRIÇÃO
+// 4. DISPARO DE E-MAIL DE CONFIRMAÇÃO
+// ============================================================================
+
+/**
+ * Envia o e-mail estilizado de confirmação ou lista de espera
+ */
+function enviarEmailInscricao(dados) {
+  try {
+    const destinatario = dados.email;
+    const nome = dados.nome;
+    const area = dados.area;
+    const confirmado = dados.confirmado;
+    const dataHoraStr = dados.dataHoraStr || 'A definir pelo RH';
+    const local = dados.local || 'Sala de Reunião Principal (Presencial)';
+
+    let assunto = '';
+    let htmlCorpo = '';
+
+    if (confirmado) {
+      assunto = '✅ Vaga Confirmada: Devolutiva RH — ' + area;
+      htmlCorpo = `
+        <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
+          <div style="background: linear-gradient(135deg, #0f2b5c, #1e3a8a); color: #ffffff; padding: 28px; text-align: center;">
+            <span style="background: rgba(255,255,255,0.2); padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; letter-spacing: 0.5px;">RH CAPITAL REALTY</span>
+            <h2 style="margin: 12px 0 6px 0; font-size: 22px;">Inscrição Confirmada!</h2>
+            <p style="margin: 0; opacity: 0.9; font-size: 14px;">Devolutiva Aberta — Pesquisa RH 360</p>
+          </div>
+          <div style="padding: 28px; color: #334155; line-height: 1.6;">
+            <p style="font-size: 16px; margin-top: 0;">Olá, <b>${nome}</b>!</p>
+            <p>Sua vaga presencial para a apresentação de resultados da área <b>${area}</b> está garantida.</p>
+            
+            <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 16px; border-radius: 6px; margin: 20px 0;">
+              <div style="margin-bottom: 8px;"><b>Área:</b> ${area}</div>
+              <div style="margin-bottom: 8px;"><b>Data e Horário:</b> ${dataHoraStr}</div>
+              <div style="margin-bottom: 8px;"><b>Local:</b> ${local}</div>
+              <div><b>Status:</b> <span style="color: #16a34a; font-weight: bold;">${dados.status}</span></div>
+            </div>
+
+            <div style="background-color: #fefce8; border: 1px solid #fef08a; padding: 14px; border-radius: 8px; font-size: 13px; color: #854d0e; margin-bottom: 20px;">
+              <b>⚠️ Aviso Importante:</b> A sala de reunião possui capacidade máxima de <b>12 pessoas</b>. Caso você tenha algum imprevisto e não possa comparecer, por favor avise o time de RH com antecedência para que possamos liberar a vaga para a lista de espera!
+            </div>
+
+            <p style="font-size: 14px; color: #64748b; margin-bottom: 0;">
+              O convite na sua Google Agenda já foi vinculado ou será enviado assim que o cronograma for confirmado.
+            </p>
+          </div>
+          <div style="background-color: #f1f5f9; padding: 16px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #e2e8f0;">
+            Equipe de Recursos Humanos — Capital Realty
+          </div>
+        </div>
+      `;
+    } else {
+      assunto = '📋 Lista de Espera: Devolutiva RH — ' + area;
+      htmlCorpo = `
+        <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
+          <div style="background: linear-gradient(135deg, #0f2b5c, #1e3a8a); color: #ffffff; padding: 28px; text-align: center;">
+            <span style="background: rgba(255,255,255,0.2); padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; letter-spacing: 0.5px;">RH CAPITAL REALTY</span>
+            <h2 style="margin: 12px 0 6px 0; font-size: 22px;">Inscrição na Lista de Espera</h2>
+            <p style="margin: 0; opacity: 0.9; font-size: 14px;">Devolutiva Aberta — Pesquisa RH 360</p>
+          </div>
+          <div style="padding: 28px; color: #334155; line-height: 1.6;">
+            <p style="font-size: 16px; margin-top: 0;">Olá, <b>${nome}</b>!</p>
+            <p>Recebemos o seu interesse em participar da apresentação de resultados da área <b>${area}</b>.</p>
+            
+            <div style="background-color: #fffbeb; border-left: 4px solid #f59e0b; padding: 16px; border-radius: 6px; margin: 20px 0;">
+              <div style="margin-bottom: 8px;"><b>Área:</b> ${area}</div>
+              <div><b>Situação:</b> <span style="color: #b45309; font-weight: bold;">${dados.status}</span></div>
+            </div>
+
+            <p>Como a sala presencial atingiu o limite de <b>12 vagas</b>, você foi registrado(a) com prioridade na <b>Lista de Espera</b>.</p>
+            <p style="font-size: 14px; color: #64748b;">
+              O time de RH está avaliando a demanda para a abertura de uma <b>2ª turma</b> para esta área. Havendo desistências ou a abertura de uma nova agenda, você será avisado(a) imediatamente por aqui!
+            </p>
+          </div>
+          <div style="background-color: #f1f5f9; padding: 16px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #e2e8f0;">
+            Equipe de Recursos Humanos — Capital Realty
+          </div>
+        </div>
+      `;
+    }
+
+    MailApp.sendEmail({
+      to: destinatario,
+      subject: assunto,
+      htmlBody: htmlCorpo,
+      name: NOME_REMETENTE_EMAIL
+    });
+
+    return true;
+  } catch (err) {
+    Logger.log('Erro ao enviar e-mail: ' + err.message);
+    return false;
+  }
+}
+
+// ============================================================================
+// 5. PROCESSAMENTO DE INSCRIÇÃO
 // ============================================================================
 
 function realizarInscricao(dados) {
@@ -287,15 +386,24 @@ function realizarInscricao(dados) {
     const abaInscricoes = ss.getSheetByName('Inscricoes');
 
     const sessoesDados = abaSessoes.getDataRange().getValues();
+    const sessoesDisplay = abaSessoes.getDataRange().getDisplayValues();
+
     let linhaSessao = -1;
     let sessaoEncontrada = null;
 
     for (let i = 1; i < sessoesDados.length; i++) {
       if (String(sessoesDados[i][0]) === dados.idSessao) {
         linhaSessao = i + 1;
+        const dStr = sanitizarData(sessoesDados[i][2], sessoesDisplay[i][2]);
+        const hIni = sessoesDisplay[i][3] ? sessoesDisplay[i][3].trim() : '';
+        const hFim = sessoesDisplay[i][4] ? sessoesDisplay[i][4].trim() : '';
+        const dataHoraFormatada = dStr ? (dStr + (hIni ? ' às ' + hIni : '')) : 'A definir pelo RH';
+
         sessaoEncontrada = {
           idSessao: sessoesDados[i][0],
           area: sessoesDados[i][1],
+          dataHoraStr: dataHoraFormatada,
+          local: sessoesDados[i][5] || 'Sala de Reunião Principal',
           limite: Number(sessoesDados[i][6]) || LIMITE_VAGAS_PADRAO,
           confirmados: Number(sessoesDados[i][7]) || 0,
           espera: Number(sessoesDados[i][8]) || 0,
@@ -355,6 +463,18 @@ function realizarInscricao(dados) {
       abaSessoes.getRange(linhaSessao, 9).setValue(numEspera);
     }
 
+    // Dispara o e-mail automático
+    const emailEnviado = enviarEmailInscricao({
+      email: emailLimpo,
+      nome: nomeLimpo,
+      area: sessaoEncontrada.area,
+      dataHoraStr: sessaoEncontrada.dataHoraStr,
+      local: sessaoEncontrada.local,
+      confirmado: ehConfirmado,
+      status: statusFinal,
+      limite: sessaoEncontrada.limite
+    });
+
     // Registra na aba de Inscrições
     abaInscricoes.appendRow([
       carimbo,
@@ -363,7 +483,8 @@ function realizarInscricao(dados) {
       nomeLimpo,
       emailLimpo,
       deptoLimpo,
-      statusFinal
+      statusFinal,
+      emailEnviado ? 'Sim' : 'Erro no envio'
     ]);
 
     return {
@@ -371,9 +492,10 @@ function realizarInscricao(dados) {
       confirmado: ehConfirmado,
       area: sessaoEncontrada.area,
       status: statusFinal,
+      emailEnviado: emailEnviado,
       mensagem: ehConfirmado
-        ? '🎉 Inscrição confirmada com sucesso! Sua vaga na sala está garantida (limite de 12 pessoas).'
-        : '⚠️ A sala atingiu o limite de 12 vagas presenciais. Sua inscrição foi registrada com prioridade na LISTA DE ESPERA para a 2ª turma!'
+        ? '🎉 Inscrição confirmada com sucesso! Enviamos um e-mail com os detalhes da sua vaga.'
+        : '⚠️ A sala atingiu o limite de 12 vagas presenciais. Você foi registrado(a) na LISTA DE ESPERA para a 2ª turma e enviamos a confirmação no seu e-mail!'
     };
   } catch (err) {
     return { sucesso: false, erro: err.message };
