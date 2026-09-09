@@ -12,8 +12,8 @@
  * - Banco de dados em Google Sheets e sincronização com Google Calendar.
  */
 
-// ID da Planilha do Google Sheets
-const ID_PLANILHA = '1v1SEGIhzfBYkI4xBCexZlRfRoqn_2WaHz83S9kR9x6g';
+// ID da Planilha do Google Sheets (Gestão de Devolutivas)
+const ID_PLANILHA = '1sb2kDseQ8AoVJcZYERLyO9l2FpDMTYV8lfZHTqLbirk';
 
 // Limite de pessoas por sessão (capacidade da sala)
 const LIMITE_VAGAS_PADRAO = 12;
@@ -101,25 +101,17 @@ function onOpen() {
 }
 
 function getPlanilhaDB() {
-  // 1. Tenta obter a planilha ativa (quando executado no contexto do Google Sheets)
-  try {
-    const active = SpreadsheetApp.getActiveSpreadsheet();
-    if (active && (active.getSheetByName('Sessoes') || active.getSheetByName('Inscricoes'))) {
-      return active;
-    }
-  } catch (e) {}
-
-  // 2. ID configurado na constante
+  // 1. ID configurado explicitamente na constante
   let id = (typeof ID_PLANILHA !== 'undefined' ? ID_PLANILHA : '').trim();
 
-  // 3. ID nas propriedades do script
+  // 2. ID nas propriedades do script
   if (!id) {
     id = PropertiesService.getScriptProperties().getProperty('ID_PLANILHA');
   }
 
-  // 4. ID padrão da planilha do projeto
+  // 3. Fallback para a planilha informada
   if (!id) {
-    id = '1v1SEGIhzfBYkI4xBCexZlRfRoqn_2WaHz83S9kR9x6g';
+    id = '1sb2kDseQ8AoVJcZYERLyO9l2FpDMTYV8lfZHTqLbirk';
   }
 
   if (id) {
@@ -129,6 +121,12 @@ function getPlanilhaDB() {
       Logger.log('Aviso ao abrir planilha por ID: ' + err.message);
     }
   }
+
+  // 4. Tenta obter a planilha ativa do contêiner
+  try {
+    const active = SpreadsheetApp.getActiveSpreadsheet();
+    if (active) return active;
+  } catch (e) {}
 
   throw new Error('A planilha ainda não foi configurada. Execute a função "resetarEConfigurarPlanilha()".');
 }
@@ -144,11 +142,12 @@ function resetarEConfigurarPlanilha() {
   try {
     ss = getPlanilhaDB();
   } catch (e) {
-    // Se não encontrou nenhuma, cria uma nova
-    ss = SpreadsheetApp.create('RH Capital Realty — Gestão de Devolutivas');
-    PropertiesService.getScriptProperties().setProperty('ID_PLANILHA', ss.getId());
-    Logger.log('Nova planilha criada: ' + ss.getUrl());
+    ss = SpreadsheetApp.openById('1sb2kDseQ8AoVJcZYERLyO9l2FpDMTYV8lfZHTqLbirk');
   }
+
+  // Garante a gravação do ID correto nas propriedades
+  PropertiesService.getScriptProperties().setProperty('ID_PLANILHA', ss.getId());
+  Logger.log('Operando na planilha: ' + ss.getUrl() + ' (' + ss.getId() + ')');
 
   // -------------------------------------------------------------
   // ABA 1: Sessoes
