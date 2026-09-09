@@ -1309,61 +1309,92 @@ function sincronizarComCalendar() {
 
       let evento = null;
       if (idEvento) {
-        evento = agenda.getEventById(idEvento);
-        if (!evento && idEvento.includes('@')) {
-          evento = agenda.getEventById(idEvento.split('@')[0]);
+        try {
+          evento = agenda.getEventById(idEvento);
+          if (!evento && idEvento.includes('@')) {
+            evento = agenda.getEventById(idEvento.split('@')[0]);
+          }
+          if (evento) {
+            evento.getTitle(); // Testa se o evento está vivo e não foi excluído
+          }
+        } catch (eGet) {
+          Logger.log('Aviso: Evento ' + idEvento + ' não encontrado ou inacessível. Criando novo...');
+          evento = null;
+          idEvento = '';
         }
       }
 
       if (evento) {
-        // Evento existente: se o RH alterou data, hora ou local, atualiza!
-        const inicioAtual = evento.getStartTime();
-        const fimAtual = evento.getEndTime();
-        if (inicioAtual.getTime() !== inicio.getTime() || fimAtual.getTime() !== fim.getTime()) {
-          evento.setTime(inicio, fim);
-          atualizados++;
-          Logger.log('Horário atualizado no Calendar para: ' + area);
-        }
-        if (evento.getLocation() !== local) {
-          evento.setLocation(local);
+        try {
+          // Evento existente: se o RH alterou data, hora ou local, atualiza!
+          const inicioAtual = evento.getStartTime();
+          const fimAtual = evento.getEndTime();
+          if (inicioAtual.getTime() !== inicio.getTime() || fimAtual.getTime() !== fim.getTime()) {
+            evento.setTime(inicio, fim);
+            atualizados++;
+            Logger.log('Horário atualizado no Calendar para: ' + area);
+          }
+          if (evento.getLocation() !== local) {
+            evento.setLocation(local);
+          }
+        } catch (eAtt) {
+          Logger.log('Erro ao atualizar horário de ' + area + ': ' + eAtt.message);
         }
       } else {
-        // Evento não existe ainda: cria no Calendar!
-        const sessaoObj = {
-          idSessao: idSessao,
-          area: area,
-          local: local,
-          idEvento: ''
-        };
-        evento = garantirEventoCalendar(sessaoObj, linhaPlanilha, abaSessoes, dataLimpa, horaIniVal, horaFimVal);
-        if (evento) {
-          criados++;
-          idEvento = evento.getId();
+        // Evento não existe ainda ou foi apagado: cria no Calendar!
+        try {
+          const sessaoObj = {
+            idSessao: idSessao,
+            area: area,
+            local: local,
+            idEvento: ''
+          };
+          evento = garantirEventoCalendar(sessaoObj, linhaPlanilha, abaSessoes, dataLimpa, horaIniVal, horaFimVal);
+          if (evento) {
+            criados++;
+            idEvento = evento.getId();
+            Logger.log('Novo evento criado no Calendar para: ' + area + ' em ' + dataLimpa + ' às ' + horaIniVal);
+          }
+        } catch (eCriar) {
+          Logger.log('Erro ao criar evento para ' + area + ': ' + eCriar.message);
         }
       }
 
       // Sincroniza convites dos confirmados
       if (evento) {
-        const emailsConfirmados = [];
-        for (let j = 1; j < inscricoesDados.length; j++) {
-          const sInsc = String(inscricoesDados[j][1]);
-          const emInsc = String(inscricoesDados[j][4] || '').trim().toLowerCase();
-          const stInsc = String(inscricoesDados[j][6] || '');
+        try {
+          const emailsConfirmados = [];
+          for (let j = 1; j < inscricoesDados.length; j++) {
+            const sInsc = String(inscricoesDados[j][1]);
+            const emInsc = String(inscricoesDados[j][4] || '').trim().toLowerCase();
+            const stInsc = String(inscricoesDados[j][6] || '');
 
-          if (sInsc === idSessao && stInsc.startsWith('Confirmado') && emInsc) {
-            emailsConfirmados.push(emInsc);
+            if (sInsc === idSessao && stInsc.startsWith('Confirmado') && emInsc) {
+              emailsConfirmados.push(emInsc);
+            }
           }
+
+          const convidadosAtuais = evento.getGuestList().map(g => g.getEmail().toLowerCase());
+          const emailDonoAgenda = agenda.getId().toLowerCase();
+
+          emailsConfirmados.forEach(function(emailConf) {
+            if (emailConf === emailDonoAgenda) {
+              Logger.log('Colaborador ' + emailConf + ' é o organizador/dono da agenda (o evento já consta na agenda dele).');
+              return;
+            }
+            if (!convidadosAtuais.includes(emailConf)) {
+              try {
+                evento.addGuest(emailConf);
+                convidadosTotal++;
+                Logger.log('Convidado adicionado ao Calendar: ' + emailConf + ' na sessão ' + area);
+              } catch (eG) {
+                Logger.log('Aviso ao adicionar ' + emailConf + ': ' + eG.message);
+              }
+            }
+          });
+        } catch (eConv) {
+          Logger.log('Erro ao sincronizar convidados de ' + area + ': ' + eConv.message);
         }
-
-        const convidadosAtuais = evento.getGuestList().map(g => g.getEmail().toLowerCase());
-        emailsConfirmados.forEach(function(emailConf) {
-          if (!convidadosAtuais.includes(emailConf)) {
-            try {
-              evento.addGuest(emailConf);
-              convidadosTotal++;
-            } catch (eG) {}
-          }
-        });
       }
     }
   }
