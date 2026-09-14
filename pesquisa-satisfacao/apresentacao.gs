@@ -1,5 +1,5 @@
 /**
- * APRESENTAÇÃO POR ÁREA — PESQUISA RH 360º
+ * APRESENTAÇÃO POR ÁREA — PESQUISA DE SATISFAÇÃO INTERDEPARTAMENTAL
  *
  * Um deck para cada área avaliada. Depende de sheets.gs (lerRespostas_,
  * agregarRespostas_, PERGUNTAS, compararTexto_).
@@ -23,8 +23,8 @@ const PRH_CONFIG = Object.freeze({
   expectedRatio: 16 / 9,
   slidesFixos: 7,   // capa, kpis, comparação, critérios, 1 de cada comentário, ação
   // Nome dos arquivos criados no Drive, com o nome da área no lugar de {area}.
-  nomeDoDeck: 'Pesquisa RH 360º — {area}',
-  nomeDoDeckIndicadores: 'Pesquisa RH 360º — Indicadores por área',
+  nomeDoDeck: 'Pesquisa de Satisfação Interdepartamental — {area}',
+  nomeDoDeckIndicadores: 'Pesquisa de Satisfação Interdepartamental — Indicadores por área',
   // O Apps Script derruba a execução por tempo. Ao passar disto, a rotina para
   // sozinha e guarda o progresso; a próxima execução continua de onde parou.
   limiteSegundos: 260

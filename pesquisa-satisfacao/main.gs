@@ -127,7 +127,7 @@ function getFormHTML() {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pesquisa RH 360º - Capital Realty</title>
+  <title>Pesquisa de Satisfação Interdepartamental - Capital Realty</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
@@ -491,7 +491,7 @@ function getFormHTML() {
 
       <!-- INTRO -->
       <div id="stageIntro" class="stage-intro">
-        <h1>📊 Pesquisa RH 360º</h1>
+        <h1>📊 Pesquisa de Satisfação Interdepartamental</h1>
         <div class="badges">
           <span class="badge badge-green" title="Impossível associar respostas a pessoas. Os resultados são sempre analisados de forma agregada, nunca individual.">🛡️ Pesquisa Anônima</span>
           <span class="badge badge-blue">🏢 Capital Realty</span>

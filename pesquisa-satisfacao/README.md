@@ -1,6 +1,6 @@
 # 📊 Pesquisa de Satisfação Interdepartamental — Google Apps Script
 
-Versão da **Pesquisa RH 360º** (originalmente feita no Lovable/React+Supabase) reconstruída em **Google Apps Script + Google Sheets**, sem necessidade de login. Serve um formulário web público, anônimo, e grava as respostas numa planilha do Google.
+Versão da **Pesquisa de Satisfação Interdepartamental** (originalmente feita no Lovable/React+Supabase) reconstruída em **Google Apps Script + Google Sheets**, sem necessidade de login. Serve um formulário web público, anônimo, e grava as respostas numa planilha do Google.
 
 ---
 

@@ -1,5 +1,5 @@
 /**
- * APRESENTAÇÃO DA EMPRESA — PESQUISA RH 360º
+ * APRESENTAÇÃO DA EMPRESA — PESQUISA DE SATISFAÇÃO INTERDEPARTAMENTAL
  *
  * Deck consolidado, com os números de todas as áreas. Depende de:
  *   sheets.gs        — lerRespostas_(), agregarRespostas_(), PERGUNTAS

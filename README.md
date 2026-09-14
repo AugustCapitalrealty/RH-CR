@@ -8,7 +8,7 @@ Monorepo contendo as ferramentas e automações desenvolvidas em **Google Apps S
 
 ## 📂 Projetos no Repositório
 
-### 1. [Pesquisa de Satisfação (RH 360)](./pesquisa-satisfacao)
+### 1. [Pesquisa de Satisfação Interdepartamental](./pesquisa-satisfacao)
 * **Objetivo:** Formulário web público e anônimo para avaliação interdepartamental, com painel gerencial no Google Sheets e geração automatizada de apresentações de resultados no Google Slides.
 * **Pasta:** `pesquisa-satisfacao/`
 * **Tecnologias:** Google Apps Script, Google Sheets, Google Slides, HTML5/CSS3.
