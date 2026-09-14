@@ -477,25 +477,62 @@ function enviarEmailInscricao(dados) {
 
         <!-- Corpo do E-mail -->
         <div style="padding: 32px 28px; color: #1e293b; line-height: 1.6;">
-          <p style="font-size: 16px; margin-top: 0;">Olá, <b>${nome}</b>!</p>
-          <p style="color: #334155;">Sua vaga presencial para a devolutiva da pesquisa de satisfação da área de <b>${area}</b> está garantida.</p>
-          
-          <!-- Box de Informações da Sessão -->
-          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #065CA9; padding: 18px; border-radius: 10px; margin: 24px 0;">
-            <div style="margin-bottom: 10px; font-size: 14.5px;"><b>Área:</b> <span style="color: #151E49; font-weight: 600;">${area}</span></div>
-            <div style="margin-bottom: 10px; font-size: 14.5px;"><b>Data e Horário:</b> <span style="color: #065CA9; font-weight: 600;">${dataHoraStr}</span></div>
-            <div style="margin-bottom: 10px; font-size: 14.5px;"><b>Local:</b> ${local}</div>
-            <div style="font-size: 14.5px;"><b>Status:</b> <span style="background: rgba(22, 163, 74, 0.12); color: #15803d; padding: 3px 10px; border-radius: 12px; font-weight: 700; font-size: 12.5px; border: 1px solid rgba(22, 163, 74, 0.25);">&#10003; ${dados.status}</span></div>
-          </div>
-
-          <!-- Alerta de Limite -->
-          <div style="background-color: #fefce8; border: 1px solid #fef08a; padding: 14px 18px; border-radius: 10px; font-size: 13px; color: #854d0e; margin-bottom: 22px; line-height: 1.5;">
-            <b>&#9888;&#65039; Importante:</b> A sala de reunião possui capacidade máxima de <b>12 pessoas</b>. Caso tenha algum imprevisto e não possa comparecer, por favor avise o time de RH ou utilize o sistema para registrar sua desistência e liberar a vaga para outros colegas!
-          </div>
-
-          <p style="font-size: 13.5px; color: #64748b; margin-bottom: 0; line-height: 1.5;">
-            <span style="font-size: 15px; margin-right: 6px;">&#128197;</span> O convite na sua Google Agenda já foi vinculado ou será atualizado assim que o cronograma for confirmado.
+          <p style="font-size: 16px; margin-top: 0; color: #151E49;">Olá, <b>${nome}</b>!</p>
+          <p style="color: #334155; font-size: 14.5px; line-height: 1.6; text-align: justify; margin-bottom: 24px;">
+            Sua vaga presencial para a devolutiva da pesquisa de satisfação da área de <b style="color: #151E49;">${area}</b> está garantida.
           </p>
+          
+          <!-- Box de Informações da Sessão com Alinhamento Tabular Justificado -->
+          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #065CA9; padding: 18px 20px; border-radius: 10px; margin-bottom: 22px;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 14.5px;">
+              <tr>
+                <td style="padding: 6px 0; color: #64748b; font-weight: 600; width: 130px; vertical-align: top;">Área:</td>
+                <td style="padding: 6px 0; color: #151E49; font-weight: 700; vertical-align: top;">${area}</td>
+              </tr>
+              <tr>
+                <td style="padding: 6px 0; color: #64748b; font-weight: 600; vertical-align: top;">Data e Horário:</td>
+                <td style="padding: 6px 0; color: #065CA9; font-weight: 700; vertical-align: top;">${dataHoraStr}</td>
+              </tr>
+              <tr>
+                <td style="padding: 6px 0; color: #64748b; font-weight: 600; vertical-align: top;">Local:</td>
+                <td style="padding: 6px 0; color: #334155; font-weight: 600; vertical-align: top;">${local}</td>
+              </tr>
+              <tr>
+                <td style="padding: 6px 0 2px 0; color: #64748b; font-weight: 600; vertical-align: middle;">Status:</td>
+                <td style="padding: 6px 0 2px 0; vertical-align: middle;">
+                  <span style="background: rgba(22, 163, 74, 0.12); color: #15803d; padding: 4px 12px; border-radius: 12px; font-weight: 700; font-size: 12.5px; border: 1px solid rgba(22, 163, 74, 0.25); display: inline-block;">
+                    &#10003; ${dados.status}
+                  </span>
+                </td>
+              </tr>
+            </table>
+          </div>
+
+          <!-- Alerta de Limite com Ícone Alinhado e Texto Justificado -->
+          <div style="background-color: #fefce8; border: 1px solid #fef08a; border-radius: 10px; margin-bottom: 22px; padding: 14px 18px;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="width: 28px; vertical-align: top; font-size: 17px; line-height: 1.4;">
+                  &#9888;&#65039;
+                </td>
+                <td style="font-size: 13px; color: #854d0e; line-height: 1.6; text-align: justify;">
+                  <b>Importante:</b> A sala de reunião possui capacidade máxima de <b>12 pessoas</b>. Caso tenha algum imprevisto e não possa comparecer, por favor avise o time de RH ou utilize o sistema para registrar sua desistência e liberar a vaga para outros colegas!
+                </td>
+              </tr>
+            </table>
+          </div>
+
+          <!-- Google Agenda com Ícone Alinhado e Texto Justificado -->
+          <table style="width: 100%; border-collapse: collapse; margin-top: 8px;">
+            <tr>
+              <td style="width: 28px; vertical-align: top; font-size: 16px; line-height: 1.4;">
+                &#128197;
+              </td>
+              <td style="font-size: 13.5px; color: #64748b; line-height: 1.55; text-align: justify;">
+                O convite na sua Google Agenda já foi vinculado ou será atualizado assim que o cronograma for confirmado.
+              </td>
+            </tr>
+          </table>
         </div>
 
         <!-- Rodapé do E-mail -->
@@ -812,8 +849,8 @@ function enviarEmailCancelamento(dados) {
         <!-- Corpo do E-mail -->
         <div style="padding: 28px; color: #1e293b; line-height: 1.6;">
           <p style="font-size: 15px; margin-top: 0;">Olá, <b>${dados.nome}</b>!</p>
-          <p style="color: #334155;">Confirmamos que a sua inscrição para a Devolutiva da área de <b>${dados.area}</b> foi cancelada com sucesso.</p>
-          <p style="color: #64748b; font-size: 13.5px;">Agradecemos por avisar com antecedência e liberar o espaço na sala para os seus colegas!</p>
+          <p style="color: #334155; text-align: justify; line-height: 1.6; margin-bottom: 12px;">Confirmamos que a sua inscrição para a Devolutiva da área de <b>${dados.area}</b> foi cancelada com sucesso.</p>
+          <p style="color: #64748b; font-size: 13.5px; text-align: justify; line-height: 1.6; margin-bottom: 0;">Agradecemos por avisar com antecedência e liberar o espaço na sala para os seus colegas!</p>
         </div>
 
         <!-- Rodapé do E-mail -->
